@@ -16,20 +16,25 @@
   /* ------------------------------------------------------------------ HUD */
 
   FW.app.App.prototype.hud = function () {
-    $('hud-seed').textContent = this.seed;
-    $('hud-scene').textContent = this.scene;
-    $('hud-fps').textContent = this.fps.toFixed(0);
-    $('hud-budget').textContent = this.show.lastGeos + ' / ' + this.show.maxGeos;
-    $('hud-geos').textContent = this.renderer.geos;
-    $('hud-segs').textContent = this.renderer.segs;
-    $('hud-els').textContent = this.show.elements.length;
-    $('hud-fw').textContent = this.show.fireworks.length;
-    $('hud-wh').textContent = Math.round(this.show.w) + '×' + Math.round(this.show.h)
-      + (Math.abs(this.renderer.scale - 1) > 1e-6 ? ' @' + this.renderer.scale.toFixed(2) : '');
-    $('hud-time').textContent = this.show.time.toFixed(1) + 's';
-    $('hud-state').textContent = this.paused
-      ? ((this.freezeFrames !== null || this.show.time === 0) ? '已定格' : '已暂停')
-      : '运行中';
+    var rows = {
+      seed: this.seed,
+      scene: this.scene,
+      fps: this.fps.toFixed(0),
+      budget: this.show.lastGeos + ' / ' + this.show.maxGeos,
+      geos: this.renderer.geos,
+      segs: this.renderer.segs,
+      fw: this.show.fireworks.length,
+      wh: Math.round(this.show.w) + '×' + Math.round(this.show.h)
+        + (Math.abs(this.renderer.scale - 1) > 1e-6 ? ' @' + this.renderer.scale.toFixed(2) : ''),
+      time: this.show.time.toFixed(1) + 's',
+      state: this.paused
+        ? ((this.freezeFrames !== null || this.show.time === 0) ? '已定格' : '已暂停')
+        : '运行中'
+    };
+    for (var k in rows) {
+      var el = $('hud-' + k);
+      if (el) el.textContent = rows[k];        // 标记里没有这一项就跳过
+    }
   };
 
   /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
@@ -49,7 +54,7 @@
     $('panel').hidden = hidden;
     $('hud').hidden = hidden;
     // ?ui=0 是"彻底无 UI"（截图 / 嵌入），连恢复按钮都不留；
-    // 手动「收起 UI」才留一个「≡ 控制台」把面板叫回来。
+    // 手动「收起」才留一个「控制台」按钮把面板叫回来。
     $('show').hidden = this.hideUi || !hidden;
   };
 
