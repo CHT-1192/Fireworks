@@ -9,6 +9,8 @@
     "particle",
     "port"
   ],
+  "license": "Apache-2.0",
+  "author": "CHT-1192",
   "type": "commonjs",
   "engines": {
     "node": ">=18"

@@ -1,0 +1,6 @@
+烟花 · Fireworks
+Copyright 2026 CHT-1192
+
+这是一个浏览器端的程序化烟花秀（canvas），移植自同作者的 turtle_fireworks.py。
+应用本身不依赖任何第三方运行时库；开发期的自检与截图工具用到 playwright-core
+（Apache License 2.0）。

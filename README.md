@@ -76,3 +76,9 @@ npm run browser    # 真浏览器端到端自检（Playwright 驱动**系统已�
 | [docs/styles.md](docs/styles.md) | 花型参数表（`npm run docs` 从源码生成，含"怎么加一个花型"） |
 
 新特性往哪儿加、改完跑什么，见 [docs/checks.md](docs/checks.md)。
+
+## 许可
+
+[Apache License 2.0](LICENSE)，版权署名见 [NOTICE](NOTICE)（Copyright 2026 CHT-1192）。
+`reference/turtle_fireworks.py`（Python + turtle 的原版）是同作者的作品，一并在本许可下留档。
+应用本身不依赖任何第三方运行时库；开发期的自检与截图工具用到 `playwright-core`（同为 Apache-2.0）。

@@ -65,6 +65,7 @@
 ## 目录
 
 ```
+LICENSE / NOTICE      Apache-2.0 与版权署名（Copyright 2026 CHT-1192）
 index.html            页面外壳 + 控制台/HUD + 兜底自检（单文件构建的模板）
 favicon.svg           图标源文件（橙色系烟花，可读可改）
 favicon.js            把图标压成 data URI —— 单文件版必须零外部请求，所以内联
