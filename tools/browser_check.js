@@ -177,12 +177,16 @@ async function checkTyping(page, secret) {
   const after = await inFlight();
   const box = await value();
   const st = await page.evaluate(() => ({ seed: FW.app.instance.seed,
-                                          share: FW.app.instance.shareUrl() }));
-  steps.push(`敲完 -> 在飞 ${before} → ${after} 发，种子 ${st.seed}`);
+                                          share: FW.app.instance.shareUrl(),
+                                          stored: localStorage.getItem('fw.seed') }));
+  steps.push(`敲完 -> 在飞 ${before} → ${after} 发，种子 ${st.seed}，存储 ${st.stored}`);
   if (after - before !== 2) problems.push(`敲完应插播 2 发，实际多了 ${after - before} 发`);
-  // 传播面：种子框、种子、分享链接里都不该留下那个词
+  // 传播面：种子框、种子、分享链接、浏览器存储里都不该留下那个词
   if (!/^\d+$/.test(st.seed)) problems.push(`插播后种子应仍是数字，实际 ${st.seed}`);
   if (box !== st.seed) problems.push(`敲完后种子框应刷回数字种子，实际 [${box}]`);
+  if (st.stored && !/^\d+$/.test(st.stored)) {
+    problems.push(`浏览器存储里留下了非数字种子：${st.stored}`);
+  }
   if (!shareParamsNumeric(st.share)) {
     problems.push('分享链接里出现了非数字参数：' + st.share);
   }
@@ -232,10 +236,14 @@ async function checkKeys(page) {
   return { problems, steps };
 }
 
-async function checkDev(browser) {
+/**
+ * B) 开发路径。服务器由 main() 起好、也由 main() 收 —— 这里原来自己起自己 kill，
+ * 结果 C/D 两段只能靠"刚好有别的服务器还活着"才能跑（一旦没有就 ERR_CONNECTION_REFUSED）。
+ * server: null = 复用了已经跑着的那个；undefined = 起不来。
+ */
+async function checkDev(browser, server) {
   console.log('\nB) 开发路径：' + BASE + '/（多文件）');
-  const proc = await pw.ensureServer(PORT);
-  if (proc === undefined) {
+  if (server === undefined) {
     console.log(` FAIL  开发服务器起不来（端口 ${PORT} 被占用？）`);
     return 1;
   }
@@ -292,8 +300,9 @@ async function checkDev(browser) {
          keys.steps.join('；') + (keys.problems.length ? '\n        ' + keys.problems.join('\n        ') : ''));
 
     await r0.page.close();
-  } finally {
-    if (proc) { try { proc.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
+  } catch (e) {
+    bad++;
+    console.log(' FAIL  开发路径自检抛异常：' + e.message);
   }
   return bad;
 }
@@ -494,14 +503,17 @@ async function main() {
   if (why) console.log('（' + why + '）');
   else console.log('真浏览器端到端自检（Playwright + ' + pw.findChrome() + '）');
   console.log('─'.repeat(88));
+  // 开发服务器在这里起一次，B/C/D 三段共用，最后统一收掉（B1 不需要浏览器也要跑）
+  const server = await pw.ensureServer(PORT);
   const browser = why ? null : await pw.launch();
   let bad = 0;
   try {
     bad += await checkDist(browser);
-    bad += await checkDev(browser);
+    bad += await checkDev(browser, server);
     bad += await checkRecord(browser);
     bad += await checkInteract(browser);
   } finally {
+    if (server) { try { server.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
     if (browser) await browser.close();
   }
   console.log('─'.repeat(88));

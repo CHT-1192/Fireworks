@@ -200,10 +200,17 @@ for (const [q, seed] of cases) {
 const bogus = makeApp('seed=KQXW');
 if (!/^\d+$/.test(bogus.seed)) loopProblems.push(`乱敲的字母种子应退回数字，实际 ${bogus.seed}`);
 
-// 2.4b 那个词 = 一次插播，而且**发不出去**：
-// 直接触发只是多两发，种子不动，链接/文件名/元数据里都不该出现它
+// 2.4b 那个词 = 一次插播，而且**发不出去、也留不下**：
+// 直接触发只是多两发，种子不动，链接/存储/文件名/元数据里都不该出现它
+const fakeStore = (data) => ({
+  data,
+  get(k) { return this.data[k] === undefined ? null : this.data[k]; },
+  set(k, v) { this.data[k] = v; }
+});
 const plain = makeApp('seed=7&w=924&h=691');
-const egg = makeApp('seed=7&w=924&h=691');
+const eggStore = fakeStore({ seed: '7' });
+const egg = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                      search: new URLSearchParams('seed=7&w=924&h=691'), store: eggStore });
 egg.interlude();
 if (plain.show.fireworks.length !== 2) {
   loopProblems.push(`普通种子开场应有 2 发，实际 ${plain.show.fireworks.length}`);
@@ -216,8 +223,27 @@ const shareQuery = egg.shareUrl().split('?')[1] || '';
 if (!/^seed=\d+(&max=\d+)?$/.test(shareQuery)) {
   loopProblems.push('分享链接的参数里出现了非数字：' + egg.shareUrl());
 }
+if (eggStore.data.seed !== '7') {
+  loopProblems.push('插播往浏览器存储里写了东西：' + eggStore.data.seed);
+}
 if (FW.app.seedFromRaw(SECRET) !== '') loopProblems.push('seedFromRaw 不该放那个词进来');
 if (!egg.eggFound) loopProblems.push('插播后没有记住"词已找到"（控制台提示该闭嘴了）');
+
+// 2.4c 存储里只该有数字：更早的版本把那个词存过一份，开机就该被抹掉
+const stale = fakeStore({ seed: SECRET });
+const cleaned = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                          search: new URLSearchParams('w=924&h=691'), store: stale });
+if (/[A-Za-z]/.test(String(stale.data.seed))) {
+  loopProblems.push('存储里那份那个词没被抹掉：' + stale.data.seed);
+}
+if (!/^\d+$/.test(cleaned.seed)) loopProblems.push(`抹掉后应退回数字种子，实际 ${cleaned.seed}`);
+// 数字种子照旧沿用（上次那一场）
+const keptStore = fakeStore({ seed: '42' });
+const kept = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                       search: new URLSearchParams('w=924&h=691'), store: keptStore });
+if (kept.seed !== '42' || keptStore.data.seed !== '42') {
+  loopProblems.push(`上次的种子没被沿用：${kept.seed} / ${keptStore.data.seed}`);
+}
 
 // 逐字符守卫（种子框只允许"数字"或"密语的正确前缀"）—— 彩蛋就靠它做反馈
 const wrongFirst = (SECRET[0] === 'Q') ? 'Z' : 'Q';

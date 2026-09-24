@@ -1386,11 +1386,17 @@ setTimeout(function () {
     this.store = opts.store || { get: function () { return null; }, set: function () {} };
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。URL 里是数字就用，是那个词
-    // 就用那个词，其它（含乱敲的字母）一律不认。
+    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。三处都只认数字，那个词不是
+    // 种子（它只在种子框里被敲对的那一刻插播两发，见 interlude()）。
     var raw = seedFromRaw(q.get('seed'));
     if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
-    else raw = seedFromRaw(this.store.get('seed'));
+    else {
+      var kept = this.store.get('seed');
+      raw = seedFromRaw(kept);
+      // 更早的版本把那个词当种子存过（fw.seed=FIREWORKS）：认不出来就顺手抹掉，
+      // 别让它留在浏览器存储里 —— 那也是会被翻出来的地方。
+      if (!raw && kept) this.store.set('seed', String(FW.rng.dailySeed()));
+    }
     if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.eggFound = false;               // 那个词只在本场被敲对时置位，不进 URL/存储
     this.seed = raw;
