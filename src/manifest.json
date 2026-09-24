@@ -13,6 +13,7 @@
     "app.js",
     "ebml.js",
     "record.js",
+    "pngmeta.js",
     "actions.js",
     "ui.js"
   ]

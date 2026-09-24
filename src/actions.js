@@ -113,11 +113,36 @@
     });
   };
 
+  /**
+   * 存 PNG。canvas 自己导出的 PNG 是"裸"的，所以这里把**种子、场景、这一场的链接**
+   * 写进它的元数据（iTXt 块，UTF-8；见 src/pngmeta.js）。文件名本来也带场景与种子。
+   */
   FW.app.App.prototype.savePng = function () {
-    var a = document.createElement('a');
-    a.download = 'fireworks_' + this.scene + '_seed' + this.seed
-               + '_t' + this.show.time.toFixed(2) + '.png';
-    a.href = this.renderer.toDataURL();
-    a.click();
+    var name = 'fireworks_' + this.scene + '_seed' + this.seed
+             + '_t' + this.show.time.toFixed(2) + '.png';
+    var tags = FW.pngmeta.tags({
+      seed: this.seed, scene: this.scene, url: this.shareUrl(), time: new Date()
+    });
+    function save(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+      console.log('存图 ' + name + '（元数据里写了种子与链接）');
+    }
+    if (this.canvas.toBlob) {
+      this.canvas.toBlob(function (blob) {
+        if (!blob) return;
+        blob.arrayBuffer().then(function (buf) {
+          save(new Blob([FW.pngmeta.addText(new Uint8Array(buf), tags)], { type: 'image/png' }));
+        });
+      }, 'image/png');
+    } else {                                  // 老浏览器：退回没有元数据的 PNG
+      var a = document.createElement('a');
+      a.download = name;
+      a.href = this.renderer.toDataURL();
+      a.click();
+    }
   };
 })(globalThis.FW || (globalThis.FW = {}));

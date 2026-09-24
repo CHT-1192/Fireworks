@@ -115,7 +115,7 @@ function stubWindow(w, h, dpr) {
 /** 仿真 + 渲染器 + 应用核心一起加载（这三者都不需要 DOM；ui.js 才需要）。 */
 function loadWithRenderer() {
   const FW = loadSim();
-  for (const f of ['view.js', 'app.js']) {
+  for (const f of ['view.js', 'app.js', 'ebml.js', 'pngmeta.js']) {
     vm.runInThisContext(fs.readFileSync(path.join(ROOT, 'src', f), 'utf8'),
                         { filename: 'src/' + f });
   }

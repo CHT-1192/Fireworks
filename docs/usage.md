@@ -19,6 +19,30 @@
 就把键盘还给快捷键，Esc 任何时候都有效。
 点击发射走 pointer 事件，所以手机触摸同样可用（canvas 已设 `touch-action: none`）。
 
+## 存图与录制：元数据
+
+| 动作 | 产物 | 元数据里写了什么 |
+| --- | --- | --- |
+| 「存图」 | PNG（文件名带场景与种子） | `Software` · `Seed` · `Scene` · `Comment`（**这一场的链接**）· `Creation Time` |
+| 「录制」 | WebM（文件名带场景与种子） | `SEED` |
+
+两边的实现不一样，原因也值得知道：
+
+- **PNG** 是"裸"的（canvas 自己导出时不带任何文本块），所以 `src/pngmeta.js` 直接往字节流里插
+  **iTXt** 块（用 iTXt 而不是 tEXt，因为它是 UTF-8，中文不会坏），插在 IHDR 之后 —— 图本身
+  一个像素都不动，`IDAT` 也不受影响。
+- **WebM** 只能写 `SEED`：MediaRecorder 不给写 tag 的接口，只能覆盖 Chromium 的 muxer 在头部
+  留的 **Void 空隙 —— 实测固定 47 字节**（2 秒和 8 秒录制都一样），装得下种子、装不下一个
+  46 字符的链接；而 ffmpeg/播放器只在第一个 Cluster 之前找标签，尾接的读不到。链接就放
+  PNG 元数据和文件名里。
+
+读出来看看：
+
+```bash
+exiftool shot.png                                   # PNG：Seed / Scene / Comment …
+ffprobe -v error -show_entries format_tags clip.webm # WebM：SEED=…
+```
+
 ## 录制
 
 - **只录画布**：`canvas.captureStream()` 抓的是 canvas 自己画的东西，面板、HUD、

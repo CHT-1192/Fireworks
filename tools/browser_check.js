@@ -16,7 +16,8 @@
  *   C) 录制：真按「录制」-> 面板收起 -> 停止 -> 下载的 WebM 能被 ffprobe 读到
  *      SEED 元数据、能被浏览器解码、文件名带种子（没有 ffprobe 就跳过元数据那一步）。
  *   D) 交互：点画面在该处炸（坐标换算对不对）、每日按钮跳到当天种子、复制链接把
- *      可用链接写进剪贴板、全屏按钮真的进全屏。
+ *      可用链接写进剪贴板、全屏按钮真的进全屏；存图下载的 PNG 里要带种子与链接的
+ *      元数据（并且图本身还能解码）。
  *
  * 缺 playwright-core 或浏览器时：A 跳过、B 的列表比对仍然要跑。
  * 用法：node tools/browser_check.js      （npm i 一次；CHROME= 可指定浏览器）
@@ -28,6 +29,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const pw = require('./pw');
+const FWPNG = require('./loader').loadSim(['pngmeta.js']);
 
 const DIST = path.join(pw.ROOT, 'dist', 'turtle_fireworks.html');
 const MANIFEST = path.join(pw.ROOT, 'src', 'manifest.json');
@@ -393,7 +395,42 @@ async function checkInteract(browser) {
   if (!urlOk) problems.push('剪贴板里的链接不对：' + clip);
   steps.push(`链接 ${clip.slice(0, 72)}`);
 
-  // D4) 全屏
+  // D4) 存图：PNG 元数据里要有种子与链接，且图还能解码
+  const seedNow = await page.evaluate(() => FW.app.instance.seed);
+  const [png] = await Promise.all([
+    page.waitForEvent('download', { timeout: 20000 }),
+    page.click('#save')
+  ]);
+  const pngFile = path.join(os.tmpdir(), 'fw-save-check.png');
+  await png.saveAs(pngFile);
+  const pngBytes = fs.readFileSync(pngFile);
+  await page.waitForTimeout(200);
+  const meta = FWPNG.pngmeta.readText(new Uint8Array(pngBytes));
+  const pngName = png.suggestedFilename();
+  if (meta.Seed !== String(seedNow)) {
+    problems.push(`PNG 元数据里的种子是「${meta.Seed}」，应为「${seedNow}」`);
+  }
+  if (!/seed=/.test(meta.Comment || '')) problems.push('PNG 元数据里没有这一场的链接');
+  if (!/seed/.test(pngName)) problems.push('PNG 文件名里没有种子：' + pngName);
+  const imgDim = await page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + b64;
+    try {
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = () => rej(new Error('decode error'));
+        setTimeout(() => rej(new Error('timeout')), 6000);
+      });
+      return { w: img.naturalWidth, h: img.naturalHeight };
+    } catch (e) { return { err: e.message }; }
+  }, pngBytes.toString('base64'));
+  if (!imgDim.w) problems.push('插了元数据的 PNG 解码失败：' + (imgDim.err || '无尺寸'));
+  steps.push(`存图 ${pngName}（${Math.round(pngBytes.length / 1024)} KB）`
+    + ` 元数据 Seed=${meta.Seed} Comment=${String(meta.Comment).slice(0, 40)}…`
+    + ` 解码 ${imgDim.w}×${imgDim.h}`);
+  try { fs.rmSync(pngFile, { force: true }); } catch (e) { /* 无所谓 */ }
+
+  // D5) 全屏
   await page.click('#fullscreen');
   await page.waitForTimeout(400);
   const inFs = await page.evaluate(() => !!document.fullscreenElement);

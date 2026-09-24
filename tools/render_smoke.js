@@ -105,6 +105,50 @@ if (budgetProblems.length) {
 console.log('─'.repeat(76));
 for (const p of budgetProblems) problems.push(p);
 
+/* ------------------------------------------------ 1.6) PNG 元数据 */
+
+// crc32 用标准测试向量；插块用合成 PNG 往返（Node 里就能验，不用浏览器）
+const pngChecks = [];
+if (FW.pngmeta.crc32(new TextEncoder().encode('123456789')) !== 0xcbf43926) {
+  pngChecks.push('crc32("123456789") 不等于标准向量 0xcbf43926');
+}
+{
+  // 合成最小 PNG：IHDR + IDAT + IEND
+  const zlib = require('zlib');
+  const mk = (type, data) => {
+    const t = Buffer.from(type, 'latin1');
+    const body = Buffer.concat([t, data]);
+    const head = Buffer.alloc(4); head.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(FW.pngmeta.crc32(body));
+    return Buffer.concat([head, body, crc]);
+  };
+  const raw = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    mk('IHDR', Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])),
+    mk('IDAT', zlib.deflateSync(Buffer.from([0, 255, 128, 0]))),
+    mk('IEND', Buffer.alloc(0))
+  ]);
+  const pairs = FW.pngmeta.tags({ seed: '49388', scene: 'random',
+                                  url: 'https://x/Fireworks/?seed=49388',
+                                  time: new Date('2026-09-24T02:30:00Z') });
+  const tagged = Buffer.from(FW.pngmeta.addText(new Uint8Array(raw), pairs));
+  const back = FW.pngmeta.readText(new Uint8Array(tagged));
+  if (back.Seed !== '49388') pngChecks.push('PNG 元数据读不回种子');
+  if (!/seed=49388/.test(back.Comment || '')) pngChecks.push('PNG 元数据读不回链接');
+  if (back.Software !== '烟花 · Fireworks') pngChecks.push('PNG 元数据的 Software 不对（UTF-8？）');
+  const order = FW.pngmeta.chunks(new Uint8Array(tagged)).map((c) => c.type).join(' ');
+  if (order !== 'IHDR iTXt iTXt iTXt iTXt iTXt IDAT IEND') pngChecks.push('块顺序不对：' + order);
+  const idat = FW.pngmeta.chunks(new Uint8Array(tagged)).find((c) => c.type === 'IDAT');
+  if (zlib.inflateSync(Buffer.from(idat.data)).length !== 4) pngChecks.push('插块后 IDAT 坏了');
+}
+
+console.log('PNG 元数据自检（crc32 标准向量 + 合成 PNG 插块往返）');
+console.log('─'.repeat(76));
+if (pngChecks.length) for (const p of pngChecks) console.log('  ✗ ' + p);
+else console.log('  OK   crc32 对上标准向量；iTXt 插在 IHDR 之后；种子/链接/Software 读得回；IDAT 未损坏');
+console.log('─'.repeat(76));
+for (const p of pngChecks) problems.push(p);
+
 /* ------------------------------------------------ 2) 主循环 */
 
 const { App } = FW.app;

@@ -61,3 +61,15 @@ canvas 有 `stroke()` + `lineCap/lineJoin = round`，于是一条真实轨迹就
   —— 先冻住、真键盘按 16 次 R、再同步推 200 帧。画面逐像素一致，只有 HUD 里的 fps 读数会变。
 - 图标没有栅格图：`favicon.svg` 是源文件，`favicon.js` 把它压成 data URI 内联进页面 —— 单文件版
   必须**零外部请求**。
+
+## 元数据：两个容器，两种办法
+
+导出的文件都要能"拿到就复现同一场"，所以种子（以及这一场的链接）写进文件元数据。
+
+- **PNG**（`src/pngmeta.js`，纯函数、Node 可测）：往字节流里插 **iTXt** 块，插在 IHDR 之后。
+  用 iTXt 而不是 tEXt 是因为它按 UTF-8 存，中文不会坏；图本身一个像素都不动，`IDAT` 与所有块的
+  CRC 都保持正确。crc32 用标准测试向量（`"123456789"` → `0xCBF43926`）守着。
+- **WebM**（`src/ebml.js`）：MediaRecorder 不给写 tag 的接口，只能覆盖 Chromium 在头部留的
+  **Void 空隙 —— 实测固定 47 字节**（录制多长都一样），装得下 `SEED`、装不下 46 字符的链接；
+  而 ffmpeg/播放器只在第一个 Cluster 之前找标签，尾接的读不到。所以 WebM 只写种子，
+  链接去 PNG 与文件名里。
