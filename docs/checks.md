@@ -66,6 +66,8 @@
 
 ```
 index.html            页面外壳 + 控制台/HUD + 兜底自检（单文件构建的模板）
+favicon.svg           图标源文件（橙色系烟花，可读可改）
+favicon.js            把图标压成 data URI —— 单文件版必须零外部请求，所以内联
 server.js             零依赖开发服务器（每次请求重读 manifest 并注入模块）
 build.js              npm run build：体量体检 + 打包可复现的单文件（顺带写 docs/index.html）
 src/                  13 个模块 + manifest.json（加载顺序）
@@ -80,6 +82,7 @@ tools/
   fake_canvas.js      假 canvas 上下文 + window/rAF 桩 + 模块加载
   rng_check.js        MT19937 与 CPython 逐位对拍（需 python3）
   gen_docs.js         从源码生成 docs/styles.md
+  icon_sheet.html     图标试看页（按 16/24/32/48/64 摆在浅/深标签栏上，改图标时用）
   dump_rng.py|js      随机数序列导出（rng_check 用）
   loader.js           在 Node 里按顺序加载 src 模块
 ```

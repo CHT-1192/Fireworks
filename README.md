@@ -30,7 +30,7 @@ npm run browser    # 真浏览器端到端自检（Playwright 驱动**系统已�
 | 形态 | 命令 | 产物 |
 | --- | --- | --- |
 | 开发 | `npm start` | `index.html` + `src/*.js` 十三个模块，按 `src/manifest.json` 顺序注入（manifest 每次请求都重读，不用重启）。端口 9240，`--port` 可改 |
-| 交付 | `npm run build` | 一个自包含 HTML：**90.8 KB（gzip 30.6 KB）**，零外部请求，`file://` 直接跑。构建后自检"自包含 / 无外部脚本 / 模块齐全"；产物可复现（不含时间戳，`--stamp` 才写） |
+| 交付 | `npm run build` | 一个自包含 HTML：**94.0 KB（gzip 31.7 KB）**（含内联的 SVG 图标），零外部请求，`file://` 直接跑。构建后自检"自包含 / 无外部脚本 / 模块齐全"；产物可复现（不含时间戳，`--stamp` 才写） |
 
 ## 种子
 

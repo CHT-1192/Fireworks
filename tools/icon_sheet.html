@@ -1,0 +1,36 @@
+<!doctype html><meta charset="utf-8"><title>favicon 试看</title>
+<!-- 直接用浏览器打开：把 favicon.svg 按 16/24/32/48/64 摆在浅色/深色标签栏上，
+     外加 16px 与 32px 的像素放大图 —— favicon 好不好看只能在真实尺寸下判断。 -->
+<style>
+  body { margin: 0; font: 12px -apple-system, "PingFang SC", sans-serif; }
+  .row { display: flex; align-items: center; gap: 18px; padding: 14px 16px; }
+  .light { background: #f2f4f8; color: #333; }
+  .dark { background: #16181d; color: #ddd; }
+  .tabs { background: linear-gradient(#2b2f36, #23262c); color: #cfd3da; }
+  img { display: block; image-rendering: auto; }
+  .cell { text-align: center; }
+  .cell span { display: block; margin-top: 6px; font-size: 10px; opacity: .6; }
+</style>
+<div class="row light"><b>浅色标签栏</b>
+  <div class="cell"><img src="../favicon.svg" width="16" height="16"><span>16</span></div>
+  <div class="cell"><img src="../favicon.svg" width="24" height="24"><span>24</span></div>
+  <div class="cell"><img src="../favicon.svg" width="32" height="32"><span>32</span></div>
+  <div class="cell"><img src="../favicon.svg" width="48" height="48"><span>48</span></div>
+  <div class="cell"><img src="../favicon.svg" width="64" height="64"><span>64</span></div>
+</div>
+<div class="row tabs"><b>深色标签栏</b>
+  <div class="cell"><img src="../favicon.svg" width="16" height="16"><span>16</span></div>
+  <div class="cell"><img src="../favicon.svg" width="24" height="24"><span>24</span></div>
+  <div class="cell"><img src="../favicon.svg" width="32" height="32"><span>32</span></div>
+  <div class="cell"><img src="../favicon.svg" width="48" height="48"><span>48</span></div>
+  <div class="cell"><img src="../favicon.svg" width="64" height="64"><span>64</span></div>
+</div>
+<div class="row dark"><b>16/32 像素放大（看真实栅格）</b>
+  <div class="cell"><img src="../favicon.svg" width="16" height="16" style="image-rendering:pixelated;width:96px;height:96px"><span>16 → 96</span></div>
+  <div class="cell"><img src="../favicon.svg" width="32" height="32" style="image-rendering:pixelated;width:96px;height:96px"><span>32 → 96</span></div>
+</div>
+<div class="row dark"><b>纯黑</b>
+  <div class="cell"><img src="../favicon.svg" width="16" height="16"><span>16</span></div>
+  <div class="cell"><img src="../favicon.svg" width="32" height="32"><span>32</span></div>
+  <div class="cell"><img src="../favicon.svg" width="64" height="64"><span>64</span></div>
+</div>

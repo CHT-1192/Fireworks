@@ -15,6 +15,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const FAVICON = require('./favicon.js');
 
 const ROOT = __dirname;
 const MANIFEST_FILE = path.join(ROOT, 'src', 'manifest.json');
@@ -54,7 +55,8 @@ function readIndex() {
   const tags = manifest.files
     .map((f) => `<script src="/src/${f}"></script>`)
     .join('\n');
-  return html.replace(PLACEHOLDER, tags);
+  // 图标内联成 data URI（与单文件版一致，也省掉一次请求）
+  return html.replace(PLACEHOLDER, tags).replace('__FAVICON__', FAVICON.dataUri);
 }
 
 function send(res, code, body, type) {

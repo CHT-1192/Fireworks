@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const FAVICON = require('./favicon.js');
 
 const ROOT = __dirname;
 const PLACEHOLDER = '<!--SCRIPTS-->';
@@ -20,7 +21,7 @@ const MAX_LINES = MANIFEST.maxLines || 300;
 
 // 体量检查也要管住这几个文件（原版 1171 行，所以拆成多文件而不是单文件）
 const CHECK_FILES = MANIFEST.files.map((f) => path.join('src', f))
-  .concat(['index.html', 'server.js', 'build.js']);
+  .concat(['index.html', 'server.js', 'build.js', 'favicon.js']);
 
 function countLines(text) {
   const s = text.replace(/\s+$/, '');
@@ -87,7 +88,8 @@ function build(args) {
     '-->'
   ].filter((line) => line !== null).join('\n');
   const inline = `<script>\n${parts.join('\n\n')}\n</script>`;
-  const out = banner + '\n' + html.replace(PLACEHOLDER, () => inline);
+  const out = banner + '\n'
+    + html.replace(PLACEHOLDER, () => inline).replace('__FAVICON__', FAVICON.dataUri);
 
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, out);
@@ -104,7 +106,9 @@ function build(args) {
   const back = fs.readFileSync(args.out, 'utf8');
   const broken = [];
   if (back.includes(PLACEHOLDER)) broken.push('占位符没被替换');
+  if (back.includes('__FAVICON__')) broken.push('图标占位符没被替换');
   if (/<script[^>]+src=/.test(back)) broken.push('还引用了外部脚本');
+  if (/(?:src|href)=["']https?:/.test(back)) broken.push('还有外部资源引用');
   for (const f of MANIFEST.files) {
     if (!back.includes(`===== src/${f} =====`)) broken.push(`漏了 src/${f}`);
   }
@@ -119,7 +123,7 @@ function build(args) {
     + `  (${new Date().toISOString().replace('T', ' ').slice(0, 19)})`);
   console.log(`  ${MANIFEST.files.length} 个模块 / ${srcLines} 行 JS + HTML`
     + `  ->  ${(raw / 1024).toFixed(1)} KB（gzip ${(gz / 1024).toFixed(1)} KB）`);
-  console.log(`  自检通过: 自包含、无外部脚本、${MANIFEST.files.length} 个模块齐全`);
+  console.log(`  自检通过: 自包含（图标已内联）、无外部引用、${MANIFEST.files.length} 个模块齐全`);
   if (!args.noDocs) console.log('  同时写了 docs/index.html（GitHub Pages 可直接托管 /docs）');
   console.log('  直接双击打开，或用任意静态服务器托管都能跑。');
 }

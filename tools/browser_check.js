@@ -74,6 +74,11 @@ async function check(page, c, where) {
   const h = await readHud(page);
   const problems = [];
   if (!/^烟花 · Fireworks/.test(h.title)) problems.push(`标题是「${h.title}」`);
+  // 图标必须是**内联的 SVG**（单文件版要零外部请求）
+  const icon = await page.getAttribute('link[rel=icon]', 'href').catch(() => null);
+  if (!icon || icon.indexOf('data:image/svg+xml') !== 0) {
+    problems.push('favicon 不是内联的 SVG data URI：' + String(icon).slice(0, 32));
+  }
   if (h.state === null) problems.push('没读到 HUD');
   else if (/出错/.test(h.state)) problems.push(`脚本报错：${h.state}`);
   else if (h.state !== '已定格') problems.push(`状态是「${h.state}」，应为「已定格」`);
