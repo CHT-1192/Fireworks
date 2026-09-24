@@ -156,6 +156,8 @@
 
     // 2) 出图元。临死这帧同样要调 frame()（它可能消耗 rng），只是不画出来。
     //    预算按 Python 口径结算：折线图元用它自己报的 cost（见 data.pathGeo）。
+    //    这是**兼容层**，只为保留原版的密度节流口径、方便与原版对拍；新特性不受它
+    //    约束 —— 真要按开销算，应该按实际描边段数（renderer.segs）重定义这个预算。
     var total = 0, out = [];
     for (i = 0; i < els.length; i++) {
       var e = els[i];

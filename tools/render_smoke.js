@@ -12,65 +12,14 @@
  * ==========================================================================*/
 'use strict';
 
-const path = require('path');
-const { loadSim, ROOT } = require('./loader');
-const vm = require('vm');
-const fs = require('fs');
+const { makeFakeCanvas, stubWindow, loadWithRenderer } = require('./fake_canvas');
 
-/* ---- 假 window / canvas ---- */
-global.window = { devicePixelRatio: 1, innerWidth: 924, innerHeight: 691 };
-
-const problems = [];
-
-function chkNum(v, what) {
-  if (typeof v !== 'number' || !isFinite(v)) problems.push(`${what} = ${v}`);
-}
-
-const HEX = /^#[0-9a-f]{6}$/;
-
-function FakeCtx() {
-  this.ops = 0; this.fills = 0; this.strokes = 0; this.rects = 0;
-  this._fillStyle = '#000000'; this._strokeStyle = '#000000';
-  this.lineWidth = 1; this.lineCap = ''; this.lineJoin = '';
-}
-Object.defineProperty(FakeCtx.prototype, 'fillStyle', {
-  get() { return this._fillStyle; },
-  set(v) { if (!HEX.test(String(v))) problems.push(`fillStyle = ${v}`); this._fillStyle = v; }
-});
-Object.defineProperty(FakeCtx.prototype, 'strokeStyle', {
-  get() { return this._strokeStyle; },
-  set(v) { if (!HEX.test(String(v))) problems.push(`strokeStyle = ${v}`); this._strokeStyle = v; }
-});
-FakeCtx.prototype.setTransform = function (a, b, c, d, e, f) {
-  [a, b, c, d, e, f].forEach((v, i) => chkNum(v, `setTransform[${i}]`));
-  this.ops++;
-};
-FakeCtx.prototype.fillRect = function (x, y, w, h) {
-  [x, y, w, h].forEach((v, i) => chkNum(v, `fillRect[${i}]`));
-  this.rects++; this.ops++;
-};
-FakeCtx.prototype.beginPath = function () { this.ops++; };
-FakeCtx.prototype.closePath = function () { this.ops++; };
-FakeCtx.prototype.moveTo = function (x, y) { chkNum(x, 'moveTo.x'); chkNum(y, 'moveTo.y'); this.ops++; };
-FakeCtx.prototype.lineTo = function (x, y) { chkNum(x, 'lineTo.x'); chkNum(y, 'lineTo.y'); this.ops++; };
-FakeCtx.prototype.fill = function () { this.fills++; this.ops++; };
-FakeCtx.prototype.stroke = function () {
-  chkNum(this.lineWidth, 'lineWidth');
-  if (this.lineWidth <= 0) problems.push(`lineWidth = ${this.lineWidth}`);
-  this.strokes++; this.ops++;
-};
-
-const ctx = new FakeCtx();
-const canvas = {
-  clientWidth: 924, clientHeight: 691, width: 0, height: 0,
-  getContext: () => ctx,
-  toDataURL: () => 'data:image/png;base64,'
-};
+/* ---- 假 canvas（见 tools/fake_canvas.js）---- */
+stubWindow(924, 691);
+const { canvas, ctx, problems } = makeFakeCanvas(924, 691);
 
 /* ---- 加载仿真模块 + 渲染器 ---- */
-const FW = loadSim();
-vm.runInThisContext(fs.readFileSync(path.join(ROOT, 'src', 'view.js'), 'utf8'),
-                    { filename: 'src/view.js' });
+const FW = loadWithRenderer();
 
 const SCENES = ['classic', 'original', 'random'];
 const MODES = [false, true];

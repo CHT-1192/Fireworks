@@ -45,7 +45,8 @@
 
     this.paused = false;
     this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
-    // 光滑尾迹（canvas 增强）：?exact=1 关掉，退回原版的 2~6 段折线口径
+    // 光滑尾迹（canvas 增强）：?exact=1 关掉，退回原版的 2~6 段折线口径（兼容层，
+    // 供行为基线与原版逐像素对拍使用；日常用法不必关心）
     this.denseTrails = (q.get('exact') !== '1');
     this.acc = 0.0;
     this.frames = 0;

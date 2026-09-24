@@ -90,7 +90,8 @@
    * segs 与单段射线同格式：[[x0, y0, x1, y1, color, half], ...]
    * cost = 这一帧它在 **Python 口径**下算几个图元。图元预算 / 密度节流仍按原版
    *        口径统计，所以"画得更细"不会改变任何一颗火星的位置与随机数消耗 ——
-   *        同 seed 依然是同一场。
+   *        同 seed 依然是同一场。这是**兼容层**（服务于行为基线与原版对拍），
+   *        新特性不必继承这个口径。
    */
   function pathGeo(segs, cost) { return { shape: PATH, segs: segs, cost: cost }; }
 

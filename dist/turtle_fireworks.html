@@ -8,7 +8,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>烟花 · Canvas 复刻版</title>
+<title>烟花 · Canvas（维护版）</title>
 <link rel="icon" href="data:,">
 <style>
   :root { color-scheme: dark; }
@@ -80,7 +80,7 @@
 <canvas id="stage"></canvas>
 
 <aside id="panel">
-  <h1>烟花<span>Canvas 复刻版</span></h1>
+  <h1>烟花<span>Canvas 维护版</span></h1>
 
   <label>场景
     <select id="scene">
@@ -475,7 +475,8 @@
    * segs 与单段射线同格式：[[x0, y0, x1, y1, color, half], ...]
    * cost = 这一帧它在 **Python 口径**下算几个图元。图元预算 / 密度节流仍按原版
    *        口径统计，所以"画得更细"不会改变任何一颗火星的位置与随机数消耗 ——
-   *        同 seed 依然是同一场。
+   *        同 seed 依然是同一场。这是**兼容层**（服务于行为基线与原版对拍），
+   *        新特性不必继承这个口径。
    */
   function pathGeo(segs, cost) { return { shape: PATH, segs: segs, cost: cost }; }
 
@@ -1213,6 +1214,8 @@
 
     // 2) 出图元。临死这帧同样要调 frame()（它可能消耗 rng），只是不画出来。
     //    预算按 Python 口径结算：折线图元用它自己报的 cost（见 data.pathGeo）。
+    //    这是**兼容层**，只为保留原版的密度节流口径、方便与原版对拍；新特性不受它
+    //    约束 —— 真要按开销算，应该按实际描边段数（renderer.segs）重定义这个预算。
     var total = 0, out = [];
     for (i = 0; i < els.length; i++) {
       var e = els[i];
@@ -1433,7 +1436,8 @@
 
     this.paused = false;
     this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
-    // 光滑尾迹（canvas 增强）：?exact=1 关掉，退回原版的 2~6 段折线口径
+    // 光滑尾迹（canvas 增强）：?exact=1 关掉，退回原版的 2~6 段折线口径（兼容层，
+    // 供行为基线与原版逐像素对拍使用；日常用法不必关心）
     this.denseTrails = (q.get('exact') !== '1');
     this.acc = 0.0;
     this.frames = 0;
