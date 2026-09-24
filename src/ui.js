@@ -38,10 +38,7 @@
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
-    $('scene-help').textContent = SCENES[this.scene][1]
-      + (this.secretFound
-         ? '　🎉 密语已解锁'
-         : '　（种子只收数字；另有一串字母是彩蛋）');
+    $('scene-help').textContent = SCENES[this.scene][1];
     document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
     this.applyUiVisibility();
     this.hud();
@@ -73,9 +70,9 @@
   /* --------------------------------------------------------------- 交互 */
 
   /**
-   * 种子框的"逐字符"守卫：正常只收数字；字母只有当它正好接上密语时才留得下来，
-   * 敲错了就当场退回上一个合法内容并抖一下 —— 所以"试探每个字母"是有反馈的，
-   * 找彩蛋就是这么一个字母一个字母试出来的。粘贴也走同一条校验。
+   * 种子框的"逐字符"守卫：正常只收数字；字母只有当它正好接上那个词时才留得下来，
+   * 敲错了就当场退回上一个合法内容并抖一下 —— 所以"一个一个字母试"是有反馈的。
+   * 粘贴也走同一条校验。
    */
   FW.app.App.prototype.bindSeedInput = function () {
     var self = this;
@@ -85,7 +82,7 @@
 
     input.addEventListener('input', function () {
       var text = this.value.toUpperCase();
-      if (!FW.app.seedContentOk(text)) {          // 不是数字、也不是密语的前缀
+      if (!FW.app.seedContentOk(text)) {          // 既不是数字，也不是那个词的前缀
         this.value = lastValid;
         this.classList.remove('reject');
         void this.offsetWidth;                    // 强制重排，动画才会重播
@@ -96,10 +93,9 @@
       }
       lastValid = text;
       this.value = text;
-      if (text === FW.app.SECRET) {               // 敲全了：立刻解锁参考图风格
+      if (text === FW.app.SECRET) {               // 拼全了：换成参考图风格
         self.rebuild(undefined, text);
-        console.log('%c🎉 彩蛋找到了：' + FW.app.SECRET + ' —— 参考图风格已解锁',
-                    'color:#ffd34d;font-weight:700');
+        console.log('%c' + FW.app.SECRET + ' —— 参考图风格', 'color:#ffd34d;font-weight:700');
       }
     });
 
@@ -151,24 +147,18 @@
   /* --------------------------------------------------------------- 启动 */
 
   /**
-   * 控制台彩蛋的引子：说清"种子只收数字"，并给一个**不解谜**的提示（只报字母个数，
-   * 不报内容）—— 剩下的靠往种子框里一个字母一个字母试。
+   * 控制台里那张便条：只交代"种子框认数字"，顺口提一句那个词有几个字母，
+   * 不点破是哪个词（剩下的靠往种子框里一个一个字母试，敲错了会被弹回来）。
    */
-  function consoleEgg(app) {
+  function consoleNote(app) {
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
-    console.log('%c烟花 · Canvas 维护版', gold);
-    console.log('本场 seed: %c' + app.seed + '%c  （数字种子 → 纯随机秀）',
-                cyan, 'color:inherit');
-    if (app.secretFound) {
-      console.log('%c彩蛋已解锁：参考图风格', gold);
-      return;
-    }
-    console.log('彩蛋：种子框正常只收数字。不过有一串 %c' + FW.app.SECRET.length
-      + ' 个字母%c的词能打开参考图风格。',
+    console.log('%c烟花 · Canvas', gold);
+    console.log('seed %c' + app.seed, cyan);
+    if (app.secretFound) return;
+    console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
+      + ' 个字母%c的词是例外 —— 这里正在放的那个，一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');
-    console.log('　往种子里一个字母一个字母地敲：%c敲对了会留下来，敲错了会被弹回来%c。'
-      + '（提示：这一版的原版，是拿它画的）', 'color:#9ad', 'color:inherit');
   }
 
   function boot() {
@@ -178,7 +168,7 @@
     });
     FW.app.instance = inst;
     inst.start();
-    consoleEgg(inst);
+    consoleNote(inst);
   }
 
   if (document.readyState === 'loading') {

@@ -47,7 +47,7 @@ const DIST_CASES = [
   { name: 'classic 第1帧', q: 'scene=classic&seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
   // 彩蛋规则：数字种子 -> 纯随机秀；敲对密语 -> 参考图风格；乱敲的字母 -> 不认
   { name: '数字种子→纯随机', q: 'seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'random' },
-  { name: '密语→参考图风格', q: 'seed=TURTLE&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
+  { name: '那个词→参考图风格', q: 'seed=' + readSecret() + '&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
   { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1&w=924&h=691', time: 0, segs: false, scene: 'random' },
   { name: 'classic 第150帧', q: 'scene=classic&seed=7&frames=150&w=924&h=691', time: 149 * DT, segs: true },
   { name: 'random 第150帧', q: 'scene=random&seed=42&frames=150&w=924&h=691', time: 149 * DT, segs: true },
@@ -232,14 +232,14 @@ async function checkDev(bin) {
     bad += r.problems.length;
     report('开发页出画面', r);
 
-    // B3) 控制台彩蛋：只给"有几个字母"的提示，**不能**泄露密语本身
-    const SECRET = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) && readSecret();
+    // B3) 控制台便条：只给"有几个字母"，**不能**把那个词本身打出来
+    const SECRET = readSecret();
     const num = await dumpDom(bin, BASE + '/?seed=7&frames=30&w=924&h=691');
-    const numOk = /彩蛋/.test(num.log) && new RegExp(SECRET.length + ' 个字母').test(num.log)
+    const numOk = new RegExp(SECRET.length + ' 个字母').test(num.log)
       && !num.log.includes(SECRET);
     bad += numOk ? 0 : 1;
-    line(numOk, '控制台彩蛋(数字种子)',
-         numOk ? `给了"${SECRET.length} 个字母"的提示、没泄露密语` : '提示不符合预期或泄露了密语');
+    line(numOk, '控制台便条',
+         numOk ? `提了"${SECRET.length} 个字母"、没写出那个词` : '文案不符合预期或写出了那个词');
     if (!numOk) console.log('        ' + consoleLines(num.log));
 
     // B4) 逐字符守卫：在真浏览器里一个字母一个字母敲（夹具页驱动，不用 CDP）
@@ -249,9 +249,9 @@ async function checkDev(bin) {
     bad += okTyping ? 0 : 1;
     if (okTyping) {
       const detail = JSON.parse(m[1].replace(/^probe-ok\s*/, ''));
-      line(true, '逐字符敲密语', detail.steps.join('；'));
+      line(true, '逐字符拼词', detail.steps.join('；'));
     } else {
-      line(false, '逐字符敲密语',
+      line(false, '逐字符拼词',
            m ? JSON.parse(m[1].replace(/^probe-fail\s*/, '')).problems.join('；') : '夹具页没给出结果');
     }
   } finally {
