@@ -132,6 +132,7 @@ function checkHud(html, c) {
   const segs = Number(hud(html, 'segs'));
   const time = Number(String(hud(html, 'time')).replace('s', ''));
   if (!/canvas id="stage"/.test(html)) problems.push('页面里没有 canvas');
+  if (!/<title>烟花 · Fireworks/.test(html)) problems.push('标题不是「烟花 · Fireworks」');
   if (state === null) problems.push('没读到 HUD（脚本没跑起来？）');
   else if (/出错/.test(state)) problems.push(`脚本报错：${state}`);
   else if (state !== '已定格') problems.push(`状态是「${state}」，应为「已定格」`);

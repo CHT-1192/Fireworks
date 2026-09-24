@@ -114,7 +114,7 @@ function main() {
   });
   server.listen(args.port, args.host, () => {
     const url = `http://${args.host}:${args.port}/`;
-    console.log('烟花 · Canvas 复刻版（多文件开发形态）');
+    console.log('烟花 · Fireworks（开发形态：多文件）');
     console.log('  ' + url);
     console.log('  注入的模块: ' + loadManifest().files.join(' -> '));
     console.log('  换端口:     node server.js --port 8080');

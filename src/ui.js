@@ -39,7 +39,7 @@
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
     $('scene-help').textContent = SCENES[this.scene][1];
-    document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
+    document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
   };
@@ -153,7 +153,7 @@
   function consoleNote(app) {
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
-    console.log('%c烟花 · Canvas', gold);
+    console.log('%c烟花 · Fireworks', gold);
     console.log('seed %c' + app.seed, cyan);
     if (app.secretFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length

@@ -2,7 +2,7 @@
   "name": "canvas-fireworks",
   "version": "1.0.0",
   "private": true,
-  "description": "烟花 · Canvas 复刻版 —— turtle_fireworks.py 的浏览器移植（同 seed 逐位一致）",
+  "description": "烟花 · Fireworks —— turtle_fireworks.py 的浏览器移植（维护版）",
   "keywords": [
     "fireworks",
     "canvas",

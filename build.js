@@ -79,7 +79,7 @@ function build(args) {
   // 交付物，产物可复现才不会每次重建都产生一堆无谓 diff（要时间戳就加 --stamp）。
   const banner = [
     '<!--',
-    '  烟花 · Canvas 复刻版 —— 单文件版（由 npm run build 生成，请勿直接编辑）',
+    '  烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）',
     '  改动请改 index.html 与 src/*.js，然后重新 npm run build。',
     `  模块: ${MANIFEST.files.join(' -> ')}`,
     args.stamp ? `  构建: ${new Date().toISOString().replace('T', ' ').slice(0, 19)}` : null,

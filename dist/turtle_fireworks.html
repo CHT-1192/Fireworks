@@ -1,5 +1,5 @@
 <!--
-  烟花 · Canvas 复刻版 —— 单文件版（由 npm run build 生成，请勿直接编辑）
+  烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
   模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> ui.js
 -->
@@ -8,7 +8,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>烟花 · Canvas（维护版）</title>
+<title>烟花 · Fireworks</title>
 <link rel="icon" href="data:,">
 <style>
   :root { color-scheme: dark; }
@@ -31,23 +31,22 @@
     box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
   }
   #panel h1 { margin: 0 0 12px; font-size: 15px; font-weight: 600; letter-spacing: .3px; }
-  #panel h1 span {
-    font-size: 11px; font-weight: 400; letter-spacing: 0; margin-left: 4px;
-    color: rgba(170, 195, 255, .55);
-  }
   #panel label {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin: 9px 0; color: rgba(190, 210, 255, .78); font-size: 12px;
   }
   #panel .row { display: flex; gap: 6px; margin: 9px 0; }
   #panel .row button { flex: 1; }
-  select, input[type=number], button {
+  /* 面板里的表单控件统一外观（滑块与勾选框另有规则）。
+     注意别用 input[type=text] 这种具体选择器 —— 换一次 type 就会漏掉样式。 */
+  select, input:not([type=range]):not([type=checkbox]), button {
     font: inherit; font-size: 12px; color: #e6efff; padding: 5px 8px;
     background: rgba(255, 255, 255, .06); border: 1px solid rgba(140, 170, 255, .26);
     border-radius: 8px; outline: none;
   }
-  select, input[type=number] { width: 96px; }
-  input[type=number] { text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; accent-color: #ffd34d; min-width: 0; }
+  input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
+  button:focus-visible { border-color: rgba(255, 211, 77, .6); }
   #seed {
     flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
@@ -60,7 +59,6 @@
   button { cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
   button:hover { background: rgba(140, 170, 255, .2); border-color: rgba(160, 190, 255, .5); }
   button:active { transform: translateY(1px); }
-  input[type=range] { flex: 1; accent-color: #ffd34d; min-width: 0; }
   input[type=checkbox] { width: 15px; height: 15px; accent-color: #ffd34d; cursor: pointer; }
   #budget-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; color: #ffd98a; }
   #panel .help { margin: -4px 0 10px; font-size: 11px; line-height: 1.6; color: rgba(170, 195, 255, .5); }
@@ -89,7 +87,7 @@
 <canvas id="stage"></canvas>
 
 <aside id="panel">
-  <h1>烟花<span>Canvas</span></h1>
+  <h1>烟花 · Fireworks</h1>
 
   <label>种子
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
@@ -1504,7 +1502,7 @@ setTimeout(function () {
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
     $('scene-help').textContent = SCENES[this.scene][1];
-    document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
+    document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
   };
@@ -1618,7 +1616,7 @@ setTimeout(function () {
   function consoleNote(app) {
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
-    console.log('%c烟花 · Canvas', gold);
+    console.log('%c烟花 · Fireworks', gold);
     console.log('seed %c' + app.seed, cyan);
     if (app.secretFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
