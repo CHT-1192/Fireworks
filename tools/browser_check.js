@@ -43,9 +43,11 @@ const BROWSERS = [
 ].filter(Boolean);
 
 const DIST_CASES = [
-  // original 场景全是填充图元（辐条/发射尾迹是矩形，圆点是多边形），没有折线，
-  // 所以那一格只要求"画了东西"，不要求线段数
-  { name: '原版复刻单帧', q: 'scene=original&still=1&w=924&h=691', time: 0, segs: false },
+  // 第 1 帧（still=1）只有两枚上升中的弹体、尾迹还没成形，所以只要求"画了东西"
+  { name: 'classic 第1帧', q: 'scene=classic&seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
+  // 彩蛋规则：字母种子 -> 参考图风格，数字种子 -> 纯随机（两条都验）
+  { name: '字母种子→参考图风格', q: 'seed=KQXW&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
+  { name: '数字种子→纯随机', q: 'seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'random' },
   { name: 'classic 第150帧', q: 'scene=classic&seed=7&frames=150&w=924&h=691', time: 149 * DT, segs: true },
   { name: 'random 第150帧', q: 'scene=random&seed=42&frames=150&w=924&h=691', time: 149 * DT, segs: true },
   { name: 'random 第150帧(无UI)', q: 'scene=random&seed=42&frames=150&w=924&h=691&ui=0', time: 149 * DT, segs: true, uiHidden: true }
@@ -69,23 +71,30 @@ async function httpText(url) {
   }
 }
 
-/** 无头浏览器 --dump-dom（Chromium 有时不会自己退出，所以轮询到 HUD 出现就收工）。 */
+/**
+ * 无头浏览器 --dump-dom（Chromium 有时不会自己退出，所以轮询到 HUD 出现就收工）。
+ * 同时用 --enable-logging=stderr 把页面 console 的输出捞回来 —— 彩蛋打的就是控制台，
+ * 不然没法自动验。返回 { html, log }。
+ */
 function dumpDom(bin, url) {
   return new Promise((resolve, reject) => {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fwcheck-'));
     const p = spawn(bin, ['--headless=new', '--no-sandbox', '--disable-gpu-sandbox',
       '--disable-dev-shm-usage', '--no-first-run', '--user-data-dir=' + profile,
-      '--virtual-time-budget=4000', '--dump-dom', url], { stdio: ['ignore', 'pipe', 'ignore'] });
-    let out = '', done = false;
+      '--enable-logging=stderr', '--log-level=0',
+      '--virtual-time-budget=4000', '--dump-dom', url],
+      { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', log = '', done = false;
     const finish = () => {
       if (done) return;
       done = true;
       clearInterval(poll); clearTimeout(guard);
       try { p.kill('SIGKILL'); } catch (e) { /* 已经退出了 */ }
       fs.rmSync(profile, { recursive: true, force: true });
-      resolve(out);
+      resolve({ html: out, log });
     };
     p.stdout.on('data', (d) => { out += d; });
+    p.stderr.on('data', (d) => { log += d; });
     const poll = setInterval(() => { if (/id="hud-state"/.test(out)) finish(); }, 300);
     const guard = setTimeout(finish, 45000);
     p.on('close', finish);
@@ -113,7 +122,9 @@ function checkHud(html, c) {
   if (c.segs && !(segs > 0)) problems.push(`线段数 ${hud(html, 'segs')} 不为正`);
   if (!(Math.abs(time - c.time) < 0.05)) problems.push(`时刻 ${time}s，预期 ${c.time.toFixed(2)}s`);
   if (c.uiHidden && !/id="panel"[^>]*hidden/.test(html)) problems.push('?ui=0 但控制台没收起');
-  return { problems, state, geos, segs, time };
+  const scene = hud(html, 'scene');
+  if (c.scene && scene !== c.scene) problems.push(`场景是「${scene}」，应为「${c.scene}」`);
+  return { problems, state, geos, segs, time, scene };
 }
 
 function line(ok, name, detail) {
@@ -123,7 +134,7 @@ function line(ok, name, detail) {
 function report(name, r) {
   line(r.problems.length === 0, name,
        `时刻 ${String(r.time).padStart(4)}s  图元 ${String(r.geos).padStart(4)}  `
-       + `线段 ${String(r.segs).padStart(4)}  状态 ${r.state}`
+       + `线段 ${String(r.segs).padStart(4)}  场景 ${String(r.scene).padEnd(7)} 状态 ${r.state}`
        + (r.problems.length ? '\n        ' + r.problems.join('\n        ') : ''));
 }
 
@@ -141,7 +152,7 @@ async function checkDist(bin) {
   }
   let bad = 0;
   for (const c of DIST_CASES) {
-    const html = await dumpDom(bin, 'file://' + DIST + '?' + c.q);
+    const { html } = await dumpDom(bin, 'file://' + DIST + '?' + c.q);
     const r = checkHud(html, c);
     bad += r.problems.length;
     report(c.name, r);
@@ -199,10 +210,25 @@ async function checkDev(bin) {
       return bad;
     }
     const c = { time: 149 * DT, segs: true };
-    const dom = await dumpDom(bin, BASE + '/?scene=classic&seed=7&frames=150&w=924&h=691');
+    const { html: dom } = await dumpDom(bin, BASE + '/?scene=classic&seed=7&frames=150&w=924&h=691');
     const r = checkHud(dom, c);
     bad += r.problems.length;
     report('开发页出画面', r);
+
+    // B3) 控制台彩蛋：数字种子应提示"换成字母种子"，字母种子则不再剧透
+    const num = await dumpDom(bin, BASE + '/?seed=7&frames=30&w=924&h=691');
+    const numOk = /本场 seed:/.test(num.log) && /数字种子/.test(num.log)
+      && /彩蛋/.test(num.log) && /\?seed=[A-Z]{4}/.test(num.log);
+    bad += numOk ? 0 : 1;
+    line(numOk, '控制台彩蛋(数字种子)',
+         numOk ? '打出了当前种子 + 换成字母种子的提示' : '没打出预期的提示，见下方日志');
+    if (!numOk) console.log('        ' + num.log.split('\n').filter((l) => /CONSOLE/.test(l)).join('\n        '));
+
+    const let_ = await dumpDom(bin, BASE + '/?seed=KQXW&frames=30&w=924&h=691');
+    const letOk = /字母种子/.test(let_.log) && !/彩蛋/.test(let_.log);
+    bad += letOk ? 0 : 1;
+    line(letOk, '控制台彩蛋(字母种子)',
+         letOk ? '认出字母种子、且不再剧透' : '提示不符合预期');
   } finally {
     if (proc) { try { proc.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
   }

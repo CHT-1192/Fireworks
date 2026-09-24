@@ -7,9 +7,8 @@
   'use strict';
 
   var core = FW.core, data = FW.data, el = FW.elements;
-  var fade = core.fade, mix = core.mix, decimate = core.decimate, RAD2DEG = core.RAD2DEG;
-  var DOT = data.DOT, RAY = data.RAY, geo = data.geo;
-  var rayGeo = data.rayGeo, pathGeo = data.pathGeo, DENSE = data.DENSE;
+  var fade = core.fade, mix = core.mix, decimate = core.decimate;
+  var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo, DENSE = data.DENSE;
   var Element = el.Element;
 
   /* ------------------------------------------ 弹体：白热的头 + 身后一点火星 */
@@ -95,54 +94,6 @@
     return segs;
   };
 
-  /* ---------------------------------------- 定线：颜色写死不动的一段折线 */
-
-  /**
-   * 钉在画布上的一段折线，颜色写死不动（复刻原图那两条发射尾迹用），
-   * 到时间整条一起淡出。segs = [[x0, y0, x1, y1, color, 半宽], ...]
-   */
-  function FixedLine(show, segs, o) {
-    Element.call(this, show);
-    this.segs = segs;
-    this.life = (o && o.life !== undefined) ? o.life : 5.0;
-    this.fadePow = (o && o.fadePow !== undefined) ? o.fadePow : 0.7;
-    this.age = 0.0;
-  }
-  FixedLine.prototype = Object.create(Element.prototype);
-  FixedLine.prototype.constructor = FixedLine;
-
-  FixedLine.prototype.update = function (dt) {
-    this.age += dt;
-    if (this.age >= this.life) this.alive = false;
-  };
-
-  FixedLine.prototype.frame = function () {
-    var k = Math.pow(Math.max(0.0, Math.min(1.0, 1.0 - this.age / this.life)), this.fadePow);
-    var geos = [];
-    for (var i = 0; i < this.segs.length; i++) {
-      var s = this.segs[i];
-      var dx = s[2] - s[0], dy = s[3] - s[1];
-      var d = Math.hypot(dx, dy);
-      if (d < 0.5) continue;
-      geos.push(geo(RAY, fade(s[4], k), s[0], s[1], Math.atan2(dy, dx) * RAD2DEG, s[5], d));
-    }
-    return geos;
-  };
-
-  /** 把一条尾迹切成 n 段，给每段算一个渐变颜色（复刻原图用）。 */
-  function stemSegments(p0, p1, c0, c1, half, n) {
-    n = n === undefined ? 8 : n;
-    var segs = [];
-    for (var i = 0; i < n; i++) {
-      var t0 = i / n, t1 = (i + 1) / n;
-      segs.push([p0[0] + (p1[0] - p0[0]) * t0, p0[1] + (p1[1] - p0[1]) * t0,
-                 p0[0] + (p1[0] - p0[0]) * t1, p0[1] + (p1[1] - p0[1]) * t1,
-                 mix(c0, c1, (t0 + t1) * 0.5), half]);
-    }
-    return segs;
-  }
   FW.elements.Rocket = Rocket;
   FW.elements.Trail = Trail;
-  FW.elements.FixedLine = FixedLine;
-  FW.elements.stemSegments = stemSegments;
 })(globalThis.FW || (globalThis.FW = {}));

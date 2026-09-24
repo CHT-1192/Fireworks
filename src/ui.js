@@ -34,12 +34,12 @@
 
   /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
-    $('scene').value = this.scene;
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
-    $('scene-help').textContent = SCENES[this.scene][1];
+    $('scene-help').textContent = SCENES[this.scene][1]
+      + '（' + (this.letterSeed ? '字母种子' : '数字种子') + ' → ' + SCENES[this.scene][0] + '）';
     document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
     this.applyUiVisibility();
     this.hud();
@@ -72,17 +72,14 @@
 
   FW.app.App.prototype.bindPanel = function () {
     var self = this;
-    $('scene').addEventListener('change', function () { self.rebuild(this.value, null); });
+    // 种子改成"能打字母"：字母 -> 参考图风格，数字 -> 纯随机（场景由种子形态决定）
     $('seed').addEventListener('change', function () {
-      var v = parseInt(this.value, 10);
-      self.rebuild(null, (v >= 0) ? v : FW.rng.defaultSeed());
+      self.rebuild(undefined, this.value || FW.rng.randomLetters(4));
     });
-    $('dice').addEventListener('click', function () {
-      self.rebuild(null, FW.rng.defaultSeed());
-    });
+    $('dice-letters').addEventListener('click', function () { self.reseed(true); });
+    $('dice-number').addEventListener('click', function () { self.reseed(false); });
     $('pause').addEventListener('click', function () { self.togglePause(); });
     $('extra').addEventListener('click', function () { self.extra(); });
-    $('still').addEventListener('click', function () { self.stillFrame(); });
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
@@ -114,6 +111,23 @@
 
   /* --------------------------------------------------------------- 启动 */
 
+  /**
+   * 控制台彩蛋：把规则和当前种子打出来。数字种子时再随机发一个字母种子当提示
+   * （用 Math.random，不碰演出用的 RNG）。已经用字母种子的就不再剧透。
+   */
+  function consoleEgg(app) {
+    var gold = 'color:#ffd34d;font-weight:600';
+    var cyan = 'color:#7fd1ff;font-weight:600';
+    console.log('%c烟花 · Canvas 维护版', gold);
+    console.log('本场 seed: %c' + app.seed + '%c  （' + (app.letterSeed
+      ? '字母种子 → 参考图风格'
+      : '数字种子 → 纯随机秀') + '）', cyan, 'color:inherit');
+    if (!app.letterSeed) {
+      console.log('彩蛋：种子换成字母，开场就是参考图风格那一发 —— 试试 %c?seed='
+        + FW.rng.randomLetters(4), gold);
+    }
+  }
+
   function boot() {
     var inst = new FW.app.App({
       canvas: $('stage'),
@@ -121,6 +135,7 @@
     });
     FW.app.instance = inst;
     inst.start();
+    consoleEgg(inst);
   }
 
   if (document.readyState === 'loading') {

@@ -15,13 +15,24 @@
   var FIXED_DT = 1 / 60;                 // 固定步长（= 原版离线渲染的 60fps）
   var MAX_STEPS = 4;                     // 单帧最多追几步
   var DT_CLAMP = 0.06;                   // 单帧最多推进 60ms（同原版）
-  var ORIGINAL = FW.data.ORIGINAL;
 
   var SCENES = {
-    classic: ['参考图风格', '按参考图的配色/花型开场，随后继续随机放'],
-    random: ['纯随机', '全部程序化随机生成的一场烟花秀'],
-    original: ['原版复刻', '按截图实测坐标/颜色摆出那两发烟花（可与参考图逐帧对比）']
+    classic: ['参考图风格', '左右两发照参考图的配色/花型开场，随后继续随机放'],
+    random: ['纯随机', '全部程序化随机生成的一场烟花秀']
   };
+
+  /** 种子统一成大写去空格：字母码好念也好分享（KQXW 与 kqxw 是同一场）。 */
+  function normalizeSeed(s) { return String(s).trim().toUpperCase(); }
+
+  /**
+   * 场景由**种子形态**决定（也是个彩蛋）：
+   *   字母种子 -> 参考图风格；数字种子 -> 纯随机秀。
+   * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
+   */
+  function sceneForSeed(seed, sceneParam) {
+    if (SCENES[sceneParam]) return sceneParam;
+    return FW.rng.isNumericSeed(seed) ? 'random' : 'classic';
+  }
 
   /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
   function App(opts) {
@@ -29,9 +40,11 @@
     this.canvas = opts.canvas;
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    this.scene = SCENES[q.get('scene')] ? q.get('scene') : 'classic';
-    this.seed = parseInt(q.get('seed'), 10);
-    if (!(this.seed >= 0)) this.seed = FW.rng.defaultSeed();
+    // 不给种子就随机发一个**字母**种子 —— 于是默认开场就是参考图风格，而且
+    // HUD 与控制台里那个字母码本身就是可以分享/复现的彩蛋。
+    this.seed = normalizeSeed(q.get('seed') || '') || FW.rng.randomLetters(4);
+    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -78,7 +91,6 @@
     var ch = this.canvas.clientHeight || this.canvas.height || 1;
     var lw, lh;
     if (this.forceW && this.forceH) { lw = this.forceW; lh = this.forceH; }
-    else if (this.scene === 'original') { lw = ORIGINAL.W; lh = ORIGINAL.H; }
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
@@ -93,22 +105,23 @@
     this.renderer.layout(this.show.w, this.show.h);
   };
 
-  /** 换场景 / 换种子 / 重放：整场重开（URL 里的定格帧只在首次加载生效）。 */
+  /**
+   * 换种子 / 换场景 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
+   * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
+   */
   App.prototype.rebuild = function (scene, seed) {
-    if (scene !== undefined && scene !== null) this.scene = scene;
-    if (seed !== undefined && seed !== null) this.seed = seed;
+    if (seed !== undefined && seed !== null) this.seed = normalizeSeed(seed);
+    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 定格成参考图那一帧（第 1 帧）。 */
-  App.prototype.stillFrame = function () {
-    this.rebuild('original', this.seed);
-    this.show.step(0.0);
-    this.paused = true;
-    this.syncPanel();
+  /** 随机换一个种子：letters=true 给字母种子（参考图风格），false 给数字种子（纯随机）。 */
+  App.prototype.reseed = function (letters) {
+    this.rebuild(undefined, letters ? FW.rng.randomLetters(4) : FW.rng.defaultSeed());
   };
 
   /* --------------------------------------------------------------- 主循环 */
@@ -166,8 +179,7 @@
     var cw = this.canvas.clientWidth || this.canvas.width || 1;
     var ch = this.canvas.clientHeight || this.canvas.height || 1;
     if (cw === this.renderer.cw && ch === this.renderer.ch) return;
-    var pinned = (this.forceW && this.forceH) || this.scene === 'original';
-    if (!pinned) { this.show.w = cw; this.show.h = ch; }
+    if (!(this.forceW && this.forceH)) { this.show.w = cw; this.show.h = ch; }
     this.renderer.layout(this.show.w, this.show.h);
   };
 
@@ -184,5 +196,5 @@
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT };
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, sceneForSeed: sceneForSeed };
 })(globalThis.FW || (globalThis.FW = {}));

@@ -13,7 +13,7 @@
 
   var core = FW.core, data = FW.data;
   var fade = core.fade, mix = core.mix, decimate = core.decimate;
-  var DOT = data.DOT, geo = data.geo, rayGeo = data.rayGeo, pathGeo = data.pathGeo;
+  var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo;
   var DENSE = data.DENSE;
 
   /* ------------------------------------------------------------ 基类 */
@@ -173,15 +173,9 @@
       var now = this.show.time;
       // 记录点 + 这一帧的「活头端」，保证尾迹始终连在火花身上
       var pts = this.track.concat([[this.x, this.y, now]]);
-      if (this.trailSeg === 1) {
-        // trail_seg=1 的语义就是「一条直线」（参考图那 14 条辐条），不细采样
-        var seg = this.trailSegs([pts[0], pts[pts.length - 1]], shade)[0];
-        if (seg) geos.push(rayGeo(seg));
-      } else {
-        // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
-        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
-        if (dense.length) geos.push(pathGeo(dense));
-      }
+      // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
+      var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
+      if (dense.length) geos.push(pathGeo(dense));
     }
     var r = this.size * (0.55 + 0.45 * shade);
     geos.push(geo(DOT, fade(this.color, shade), this.x, this.y, 0.0, r, r));

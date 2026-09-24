@@ -38,7 +38,6 @@ const FRAMES = 400;
 /** 覆盖到的场景（seed 只对 random 有意义，但都固定下来更省事）。 */
 const SCENES = [
   { scene: 'classic', seed: 7 },
-  { scene: 'original', seed: 7 },
   { scene: 'random', seed: 7 },
   { scene: 'random', seed: 42 },
   { scene: 'random', seed: 123456 }

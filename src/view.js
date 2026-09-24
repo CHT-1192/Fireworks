@@ -16,7 +16,7 @@
   'use strict';
 
   var core = FW.core, data = FW.data;
-  var DOT = data.DOT, PATH = data.PATH, DOT_PTS = data.DOT_PTS, RAY_PTS = data.RAY_PTS;
+  var DOT = data.DOT, PATH = data.PATH, DOT_PTS = data.DOT_PTS;
   var toHex = core.toHex, RAD2DEG = core.RAD2DEG;
 
   /**
@@ -101,27 +101,15 @@
                      s * cs * this.dpr, -s * sn * this.dpr,
                      (this.ox + s * g.x) * this.dpr, (this.oy - s * g.y) * this.dpr);
     ctx.fillStyle = toHex(g.color);
-    var pts, i, X, Y;
-    if (g.shape === DOT) {
-      pts = DOT_PTS;
-      ctx.beginPath();
-      for (i = 0; i < pts.length; i++) {
-        X = pts[i][0] * g.wid; Y = pts[i][1] * g.leng;
-        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
-      }
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      // 单位线段：x∈[-1,1] 是粗细，y∈[0,1] 是长度
-      X = g.wid; Y = g.leng;
-      ctx.beginPath();
-      ctx.moveTo(RAY_PTS[0][0] * X, RAY_PTS[0][1] * Y);
-      ctx.lineTo(RAY_PTS[1][0] * X, RAY_PTS[1][1] * Y);
-      ctx.lineTo(RAY_PTS[2][0] * X, RAY_PTS[2][1] * Y);
-      ctx.lineTo(RAY_PTS[3][0] * X, RAY_PTS[3][1] * Y);
-      ctx.closePath();
-      ctx.fill();
+    // 圆点：正 18 边形（半径 1）按 (wid, leng) 缩放；DOT_PTS 就是 turtle 那份形状表
+    var pts = DOT_PTS, i, X, Y;
+    ctx.beginPath();
+    for (i = 0; i < pts.length; i++) {
+      X = pts[i][0] * g.wid; Y = pts[i][1] * g.leng;
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
     }
+    ctx.closePath();
+    ctx.fill();
   };
 
   /** 导出 PNG 用的 dataURL（浏览器 Canvas 自带，不用手写 zlib/PNG）。 */

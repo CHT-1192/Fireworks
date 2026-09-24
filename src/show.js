@@ -1,6 +1,6 @@
 /* ============================================================================
  * show.js —— 整场秀：管所有元素，按固定顺序推进一帧
- * 对应 turtle_fireworks.py 的 Show 一节（含 classic / original 两个场景布局）。
+ * 对应 turtle_fireworks.py 的 Show 一节（classic 场景布局）。
  * ---------------------------------------------------------------------------
  * 每帧的固定顺序（与原版一致）：
  *   1) 物理更新（可能产生新元素）
@@ -15,9 +15,7 @@
 
   var data = FW.data, Fw = FW.firework.Firework;
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
-  var STYLE_NAMES = data.STYLE_NAMES, ORIGINAL = data.ORIGINAL;
-  var stemSegments = FW.elements.stemSegments, FixedLine = FW.elements.FixedLine;
-  var Spark = FW.elements.Spark, drawnCost = data.drawnCost;
+  var STYLE_NAMES = data.STYLE_NAMES, drawnCost = data.drawnCost;
 
   //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
   //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
@@ -91,61 +89,6 @@
     this.nextSpawn = 3.2;
   };
 
-  /**
-   * **复刻原版**：完全按参考截图里量出来的坐标/颜色摆出那两发烟花，第一帧与
-   * 参考图一致（?scene=original&still=1 可以直接出对比图），之后火花照常往外
-   * 飞、下坠、变暗，画面就活起来了。
-   */
-  Show.prototype.originalScene = function () {
-    var t0 = this.time, rng = this.rng, i, dx, dy, ang, rad;
-
-    // ---- 左：红射线 + 黄圆点 ------------------------------------------
-    var cx = ORIGINAL.LEFT_CENTER[0], cy = ORIGINAL.LEFT_CENTER[1];
-    for (i = 0; i < ORIGINAL.LEFT_DOTS.length; i++) {
-      dx = ORIGINAL.LEFT_DOTS[i][0]; dy = ORIGINAL.LEFT_DOTS[i][1];
-      ang = Math.atan2(dy - cy, dx - cx);
-      rad = Math.hypot(dx - cx, dy - cy);
-      var sp = new Spark(this, dx, dy, Math.cos(ang) * rad * 1.2, Math.sin(ang) * rad * 1.2, {
-        color: ORIGINAL.YELLOW,
-        trailHot: ORIGINAL.RAY,             // 原图里射线是均匀的纯红
-        trailCool: ORIGINAL.RAY,
-        size: ORIGINAL.DOT_R,
-        life: rng.uniform(2.4, 3.0),
-        gravity: 95.0, drag: 5.0,
-        trailTime: 1e9,                     // 整条射线一直保留
-        trailSeg: 1,                        // 一段直线：爆心 -> 圆点
-        trailStep: 1e9                      // 中间不再采样
-      });
-      // 预先把「爆心 -> 圆点」这段路径塞进轨迹，第一帧就是一条直线
-      sp.track = [[cx, cy, t0], [dx, dy, t0]];
-      this.add(sp);
-    }
-
-    // ---- 右：绿圆点云团 ----------------------------------------------
-    var bx = ORIGINAL.RIGHT_STEM[1][0], by = ORIGINAL.RIGHT_STEM[1][1];
-    for (i = 0; i < ORIGINAL.RIGHT_DOTS.length; i++) {
-      dx = ORIGINAL.RIGHT_DOTS[i][0]; dy = ORIGINAL.RIGHT_DOTS[i][1];
-      ang = Math.atan2(dy - by, dx - bx);
-      rad = Math.hypot(dx - bx, dy - by);
-      this.add(new Spark(this, dx, dy, Math.cos(ang) * rad * 1.1, Math.sin(ang) * rad * 1.1, {
-        color: ORIGINAL.GREEN,
-        trailHot: ORIGINAL.GREEN, trailCool: ORIGINAL.GREEN,
-        size: ORIGINAL.DOT_R,
-        life: rng.uniform(2.6, 3.6),
-        gravity: 70.0, drag: 2.6
-      }));
-    }
-
-    // ---- 两条发射尾迹 ------------------------------------------------
-    this.add(new FixedLine(this, stemSegments(
-      ORIGINAL.LEFT_STEM[0], ORIGINAL.LEFT_STEM[1],
-      ORIGINAL.STEM_LEFT[0], ORIGINAL.STEM_LEFT[1], ORIGINAL.STEM_HALF[0]), { life: 5.5 }));
-    this.add(new FixedLine(this, stemSegments(
-      ORIGINAL.RIGHT_STEM[0], ORIGINAL.RIGHT_STEM[1],
-      ORIGINAL.STEM_RIGHT[0], ORIGINAL.STEM_RIGHT[1], ORIGINAL.STEM_HALF[1]), { life: 5.5 }));
-    this.nextSpawn = 5.5;                   // 先静静看几秒原版
-  };
-
   /* -------------------------------------------------------------- 每帧 */
 
   Show.prototype.step = function (dt) {
@@ -188,10 +131,9 @@
     }
   };
 
-  /** 开场：original=按截图实测坐标复刻；classic=参考图风格开场后继续随机；random=纯随机。 */
+  /** 开场：classic=参考图风格（左右两发的配色/花型）；random=纯随机。 */
   function build(show, scene) {
-    if (scene === 'original') show.originalScene();
-    else if (scene === 'classic') show.classicOpening();
+    if (scene === 'classic') show.classicOpening();
     else show.spawnRandom(2);
   }
 

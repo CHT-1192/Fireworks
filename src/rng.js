@@ -13,13 +13,53 @@
   var N = 624, M = 397;
   var MATRIX_A = 0x9908b0df, UPPER = 0x80000000, LOWER = 0x7fffffff;
 
+  /** 整数种子（含任意长的数字串）-> init_by_array 的 key，与 CPython 完全一致。 */
   function seedToKey(value) {
-    var v = (typeof value === 'bigint') ? value : BigInt(Math.trunc(Number(value)));
-    if (v < 0n) v = -v;
+    var v;
+    if (typeof value === 'bigint') v = value;
+    else {
+      var text = String(value).trim();
+      v = /^[+-]?\d+$/.test(text) ? BigInt(text)          // 大整数也精确，不经过 Number
+                                  : BigInt(Math.trunc(Number(value)));
+    }
+    if (v < 0n) v = -v;                            // CPython 也取绝对值
     var key = [];
     if (v === 0n) key.push(0);                     // seed 0 -> key = [0]
     while (v > 0n) { key.push(Number(v & 0xffffffffn)); v >>= 32n; }
     return key;
+  }
+
+  /** 种子是不是"纯数字"（决定它与 CPython 逐位一致、以及用哪个场景）。 */
+  function isNumericSeed(value) { return /^[+-]?\d+$/.test(String(value).trim()); }
+
+  /**
+   * 字母/文字种子 -> 32 位无符号整数（FNV-1a）。
+   * 这是**本版自定义**的映射（Python 那边没有对应物）：同一个字符串永远得到同一个
+   * 数字，所以字母种子同样可复现、可分享 —— 只是不再和 CPython 逐位对齐。
+   */
+  function hashSeed(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h;
+  }
+
+  var CODE_C = 'BCDFGHJKLMNPQRSTVWXZ';             // 声母
+  var CODE_V = 'AEIOU';                            // 韵母：拼出来像个词，好记好念
+
+  /**
+   * 生成一个 n 位字母种子码（彩蛋用）。刻意用 Math.random 而**不是**演出用的 RNG ——
+   * 否则光是生成提示就会打乱"同 seed = 同一场"。
+   */
+  function randomLetters(n) {
+    var out = '';
+    for (var i = 0; i < n; i++) {
+      var pool = (i % 2 === 0) ? CODE_C : CODE_V;
+      out += pool.charAt(Math.floor(Math.random() * pool.length));
+    }
+    return out;
   }
 
   function bitLength(n) {
@@ -36,8 +76,10 @@
     this.seed(seed === undefined || seed === null ? defaultSeed() : seed);
   }
 
+  /** 数字种子与 CPython 逐位一致；含字母的种子先 FNV-1a 哈希成数字再用。 */
   Random.prototype.seed = function (value) {
-    this.initByArray(seedToKey(value));
+    var text = String(value).trim();
+    this.initByArray(seedToKey(isNumericSeed(text) ? text : hashSeed(text)));
     return this;
   };
 
@@ -136,5 +178,6 @@
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed };
+  FW.rng = { Random: Random, defaultSeed: defaultSeed, randomLetters: randomLetters,
+             isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));

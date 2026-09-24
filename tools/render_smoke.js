@@ -23,7 +23,7 @@ stubWindow(924, 691);
 const { canvas, ctx, problems } = makeFakeCanvas(924, 691);
 const FW = loadWithRenderer();
 
-const SCENES = ['classic', 'original', 'random'];
+const SCENES = ['classic', 'random'];
 const FRAMES = 240;
 const rows = [];
 
@@ -61,10 +61,9 @@ console.log('─'.repeat(76));
 for (const r of rows) {
   if (r.drawn === 0) problems.push(`${r.scene} 一帧都没画出东西`);
 }
-// 有尾迹的场景必须真的在描边（original 场景全是填充图元，没有折线）
-for (const scene of ['classic', 'random']) {
-  const r = rows.find((x) => x.scene === scene);
-  if (!(r.segs > 0)) problems.push(`${scene} 没有任何折线描边，尾迹没画出来`);
+// 每个场景都必须真的在描边（尾迹是折线）
+for (const r of rows) {
+  if (!(r.segs > 0)) problems.push(`${r.scene} 没有任何折线描边，尾迹没画出来`);
 }
 
 /* ------------------------------------------------ 2) 主循环 */
@@ -96,7 +95,24 @@ const hold = frozen.show.time;
 for (let i = 0; i < 30; i++) { ts += 1000 / 60; frozen.stepFrame(ts); }
 if (frozen.show.time !== hold) loopProblems.push('暂停后时间还在走');
 
-// 2.4 渲染器抛异常要被 tick 兜住（onError），而不是把主循环打断
+// 2.4 字母种子 -> 参考图风格；数字种子 -> 纯随机；大小写/空格归一
+const cases = [
+  ['seed=KQXW', 'classic', 'KQXW'],
+  ['seed=kqxw', 'classic', 'KQXW'],
+  ['seed=%207%20', 'random', '7'],
+  ['seed=7&scene=classic', 'classic', '7'],
+  ['scene=random&seed=KQXW', 'random', 'KQXW']
+];
+for (const [q, scene, seed] of cases) {
+  const a = makeApp(q);
+  if (a.scene !== scene) loopProblems.push(`${q} 应该是 ${scene}，实际 ${a.scene}`);
+  if (a.seed !== seed) loopProblems.push(`${q} 种子应为 ${seed}，实际 ${a.seed}`);
+}
+// 同一个字母种子必须放出同一场
+const s1 = makeApp('seed=KQXW&frames=30'), s2 = makeApp('seed=KQXW&frames=30');
+if (s1.show.lastGeos !== s2.show.lastGeos) loopProblems.push('字母种子不可复现');
+
+// 2.5 渲染器抛异常要被 tick 兜住（onError），而不是把主循环打断
 const boom = makeApp('scene=classic&seed=7&frames=10&w=924&h=691');
 let caught = null;
 boom.onError = (e) => { caught = e; };
@@ -111,6 +127,7 @@ if (loopProblems.length) {
   for (const p of loopProblems) console.log('  ✗ ' + p);
 } else {
   console.log(`  OK   定格 (N-1)/60 秒、60 帧推进 ${advanced.toFixed(3)}s、暂停不走、异常被兜住`);
+  console.log(`  OK   字母种子→参考图风格、数字种子→纯随机、大小写归一、同种子可复现`);
 }
 console.log('─'.repeat(76));
 for (const p of loopProblems) problems.push(p);

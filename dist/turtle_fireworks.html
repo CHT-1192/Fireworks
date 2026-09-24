@@ -48,6 +48,10 @@
   }
   select, input[type=number] { width: 96px; }
   input[type=number] { text-align: right; font-variant-numeric: tabular-nums; }
+  #seed {
+    flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
+  }
   button { cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
   button:hover { background: rgba(140, 170, 255, .2); border-color: rgba(160, 190, 255, .5); }
   button:active { transform: translateY(1px); }
@@ -82,32 +86,24 @@
 <aside id="panel">
   <h1>烟花<span>Canvas 维护版</span></h1>
 
-  <label>场景
-    <select id="scene">
-      <option value="classic">参考图风格</option>
-      <option value="original">原版复刻</option>
-      <option value="random">纯随机</option>
-    </select>
-  </label>
-  <p id="scene-help" class="help"></p>
-
   <label>种子
-    <span>
-      <input id="seed" type="number" min="0" max="999999" step="1">
-      <button id="dice" title="随机换一个种子">随机</button>
-    </span>
+    <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
   </label>
+  <div class="row">
+    <button id="dice-letters" title="随机字母种子 —— 开场是参考图风格">字母种子</button>
+    <button id="dice-number" title="随机数字种子 —— 纯随机秀">数字种子</button>
+  </div>
+  <p id="scene-help" class="help"></p>
 
   <div class="row">
     <button id="pause">暂停</button>
     <button id="extra" title="快捷键 R">放一发</button>
   </div>
   <div class="row">
-    <button id="still" title="按截图实测坐标定格参考图那一帧">复刻单帧</button>
     <button id="replay" title="同一个 seed 从头再放一遍">重放本场</button>
+    <button id="save">存 PNG</button>
   </div>
   <div class="row">
-    <button id="save">存 PNG</button>
     <button id="hide">收起 UI</button>
   </div>
 
@@ -118,10 +114,10 @@
 
   <p class="hint">
     空格 暂停 / 继续 · R 放一发 · Esc 收起面板<br>
-    URL 参数：<code>?scene=original&amp;still=1</code>（= 参考图那一帧）、
-    <code>?frames=90</code>（定格第 90 帧）、<code>?ui=0</code>（无 UI 截图）、
-    <code>?seed=7&amp;max=200</code><br>
-    同一个 seed 每次都是同一场（固定 1/60 步长推进）。<br>
+    <b>字母种子</b> → 参考图风格那一发，<b>数字种子</b> → 纯随机秀；<br>
+    同一个种子每次都是同一场（固定 1/60 步长）。控制台里还有个小彩蛋。<br>
+    URL：<code>?seed=KQXW</code>、<code>?scene=random&amp;seed=7</code>、
+    <code>?frames=90</code>（定格）、<code>?ui=0</code>（无 UI）、<code>?max=200</code><br>
     「图元上限」按实际绘制开销算（折线按段数），画不动就往下调。
   </p>
 </aside>
@@ -279,13 +275,53 @@ setTimeout(function () {
   var N = 624, M = 397;
   var MATRIX_A = 0x9908b0df, UPPER = 0x80000000, LOWER = 0x7fffffff;
 
+  /** 整数种子（含任意长的数字串）-> init_by_array 的 key，与 CPython 完全一致。 */
   function seedToKey(value) {
-    var v = (typeof value === 'bigint') ? value : BigInt(Math.trunc(Number(value)));
-    if (v < 0n) v = -v;
+    var v;
+    if (typeof value === 'bigint') v = value;
+    else {
+      var text = String(value).trim();
+      v = /^[+-]?\d+$/.test(text) ? BigInt(text)          // 大整数也精确，不经过 Number
+                                  : BigInt(Math.trunc(Number(value)));
+    }
+    if (v < 0n) v = -v;                            // CPython 也取绝对值
     var key = [];
     if (v === 0n) key.push(0);                     // seed 0 -> key = [0]
     while (v > 0n) { key.push(Number(v & 0xffffffffn)); v >>= 32n; }
     return key;
+  }
+
+  /** 种子是不是"纯数字"（决定它与 CPython 逐位一致、以及用哪个场景）。 */
+  function isNumericSeed(value) { return /^[+-]?\d+$/.test(String(value).trim()); }
+
+  /**
+   * 字母/文字种子 -> 32 位无符号整数（FNV-1a）。
+   * 这是**本版自定义**的映射（Python 那边没有对应物）：同一个字符串永远得到同一个
+   * 数字，所以字母种子同样可复现、可分享 —— 只是不再和 CPython 逐位对齐。
+   */
+  function hashSeed(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h;
+  }
+
+  var CODE_C = 'BCDFGHJKLMNPQRSTVWXZ';             // 声母
+  var CODE_V = 'AEIOU';                            // 韵母：拼出来像个词，好记好念
+
+  /**
+   * 生成一个 n 位字母种子码（彩蛋用）。刻意用 Math.random 而**不是**演出用的 RNG ——
+   * 否则光是生成提示就会打乱"同 seed = 同一场"。
+   */
+  function randomLetters(n) {
+    var out = '';
+    for (var i = 0; i < n; i++) {
+      var pool = (i % 2 === 0) ? CODE_C : CODE_V;
+      out += pool.charAt(Math.floor(Math.random() * pool.length));
+    }
+    return out;
   }
 
   function bitLength(n) {
@@ -302,8 +338,10 @@ setTimeout(function () {
     this.seed(seed === undefined || seed === null ? defaultSeed() : seed);
   }
 
+  /** 数字种子与 CPython 逐位一致；含字母的种子先 FNV-1a 哈希成数字再用。 */
   Random.prototype.seed = function (value) {
-    this.initByArray(seedToKey(value));
+    var text = String(value).trim();
+    this.initByArray(seedToKey(isNumericSeed(text) ? text : hashSeed(text)));
     return this;
   };
 
@@ -402,7 +440,8 @@ setTimeout(function () {
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed };
+  FW.rng = { Random: Random, defaultSeed: defaultSeed, randomLetters: randomLetters,
+             isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/data.js ===================== */
@@ -451,7 +490,7 @@ setTimeout(function () {
 
   /* ------------------------------------------------- 自定义形状 / 图元 */
 
-  var DOT = 'fw_dot', RAY = 'fw_ray', PATH = 'fw_path', DOT_SIDES = 18;
+  var DOT = 'fw_dot', PATH = 'fw_path', DOT_SIDES = 18;
 
   /** 单位圆点（半径 1，正 18 边形），按 (wid, leng) 缩放后就是任意大小的圆点。 */
   var DOT_PTS = (function () {
@@ -463,16 +502,6 @@ setTimeout(function () {
     return pts;
   })();
 
-  /**
-   * 单位线段：x∈[-1,1] 是粗细，y∈[0,1] 是长度。
-   * turtle 里形状的 +y 轴才是「乌龟正前方」，所以长度方向放在 y 上；
-   * 画到 canvas 时用 (wid, leng) 缩放 + heading 旋转得到任意角度/长度/粗细。
-   */
-  var RAY_PTS = [[-1.0, 0.0], [1.0, 0.0], [1.0, 1.0], [-1.0, 1.0]];
-  var SHAPES = {};
-  SHAPES[DOT] = DOT_PTS;
-  SHAPES[RAY] = RAY_PTS;
-
   /** 一个待绘制的图元：字段顺序与 Python 的 Geo NamedTuple 一致。 */
   function geo(shape, color, x, y, heading, wid, leng) {
     return {
@@ -481,13 +510,6 @@ setTimeout(function () {
       wid: wid === undefined ? 1.0 : wid,
       leng: leng === undefined ? 1.0 : leng
     };
-  }
-
-  /** 单段直线图元（矩形填充）：由 [x0, y0, x1, y1, color, half] 生成一个 RAY 图元。 */
-  function rayGeo(s) {
-    var dx = s[2] - s[0], dy = s[3] - s[1];
-    return geo(RAY, s[4], s[0], s[1], Math.atan2(dy, dx) * FW.core.RAD2DEG,
-               s[5], Math.hypot(dx, dy));
   }
 
   /**
@@ -504,50 +526,6 @@ setTimeout(function () {
 
   /** 尾迹细采样上限（段）：肉眼已看不出折线，同时兜住单条尾迹的开销。 */
   var DENSE = { spark: 14, trail: 48 };
-
-  /* --------------------------------------------- 原版复刻（截图实测数据） */
-
-  //: 屏幕像素坐标 = 原图像素 / 1.8701 - 中心；颜色取像素众数/最饱和值。
-  var ORIGINAL = {
-    //: 左发的爆心（14 条射线的最小二乘交点）
-    LEFT_CENTER: [-233.9, 35.1],
-    //: 左发 14 个黄色圆点的实测位置
-    LEFT_DOTS: [
-      [-395.7, 11.9], [-371.5, -71.8], [-319.3, -140.5], [-250.9, -157.4],
-      [-176.1, -154.3], [-90.7, -124.9], [-55.7, -75.6], [-47.5, -9.9],
-      [-56.9, 79.8], [-102.9, 152.0], [-171.4, 183.4], [-250.5, 190.5],
-      [-337.2, 159.5], [-381.0, 97.3]
-    ],
-    //: 左发发射尾迹：底 -> 顶（顶端落在爆心附近）
-    LEFT_STEM: [[-106.6, -343.4], [-210.4, 46.0]],
-    //: 右发 33 个绿色圆点的实测位置
-    RIGHT_DOTS: [
-      [35.8, 125.2], [66.3, 43.3], [82.3, 235.8], [78.6, 162.7],
-      [100.5, 93.4], [124.0, 256.6], [131.4, 143.3], [137.1, 53.0],
-      [120.1, -28.8], [198.4, 281.3], [159.3, 192.2], [194.6, 134.8],
-      [176.5, 83.4], [167.9, 4.3], [234.1, 231.0], [235.0, 178.6],
-      [228.7, 89.7], [245.7, -48.0], [278.8, 281.2], [289.8, 193.4],
-      [273.9, 121.2], [253.1, 65.2], [289.7, 28.6], [251.8, 4.3],
-      [314.2, 84.7], [316.6, -56.6], [367.9, 236.1], [353.5, 151.9],
-      [353.3, 60.5], [350.9, -32.4], [411.8, 137.2], [409.6, 74.9],
-      [387.3, -7.0]
-    ],
-    //: 右发发射尾迹：底 -> 顶
-    RIGHT_STEM: [[87.7, -343.4], [218.0, -7.5]],
-    //: 实测颜色（背景就是 BG = #000020，直接从截图取的）
-    RAY: [1.0, 0.0, 0.01],                       // #ff0002 纯红
-    YELLOW: [0.882, 0.882, 0.0],                 // #e1e100
-    GREEN: [0.0, 1.0, 0.0],                      // #00ff00
-    STEM_LEFT: [[0.89, 0.30, 0.12], [0.82, 0.34, 0.22]],   // 底 #e34d1f -> 顶 #d15738
-    STEM_RIGHT: [[0.05, 0.47, 0.09], [0.03, 0.42, 0.03]],  // 底 #0d7817 -> 顶 #086b08
-    //: 实测尺寸：圆点直径 23.5px，射线粗 3.6px，尾迹粗 ~8px
-    DOT_R: 11.7,
-    RAY_HALF: 1.8,
-    STEM_HALF: [4.0, 3.7],
-    //: 参考图原始画面尺寸（Widget 里的逻辑坐标系）
-    W: 924,
-    H: 691
-  };
 
   /* ------------------------------------------------------------ 花型参数 */
 
@@ -576,10 +554,9 @@ setTimeout(function () {
 
   FW.data = {
     Palette: Palette, HALLOWEEN: HALLOWEEN, MATRIX: MATRIX, randomPalette: randomPalette,
-    DOT: DOT, RAY: RAY, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS, RAY_PTS: RAY_PTS,
-    SHAPES: SHAPES, geo: geo, rayGeo: rayGeo, pathGeo: pathGeo,
-    drawnCost: drawnCost, DENSE: DENSE,
-    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES, ORIGINAL: ORIGINAL
+    DOT: DOT, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS,
+    geo: geo, pathGeo: pathGeo, drawnCost: drawnCost, DENSE: DENSE,
+    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES
   };
 })(globalThis.FW || (globalThis.FW = {}));
 
@@ -599,7 +576,7 @@ setTimeout(function () {
 
   var core = FW.core, data = FW.data;
   var fade = core.fade, mix = core.mix, decimate = core.decimate;
-  var DOT = data.DOT, geo = data.geo, rayGeo = data.rayGeo, pathGeo = data.pathGeo;
+  var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo;
   var DENSE = data.DENSE;
 
   /* ------------------------------------------------------------ 基类 */
@@ -759,15 +736,9 @@ setTimeout(function () {
       var now = this.show.time;
       // 记录点 + 这一帧的「活头端」，保证尾迹始终连在火花身上
       var pts = this.track.concat([[this.x, this.y, now]]);
-      if (this.trailSeg === 1) {
-        // trail_seg=1 的语义就是「一条直线」（参考图那 14 条辐条），不细采样
-        var seg = this.trailSegs([pts[0], pts[pts.length - 1]], shade)[0];
-        if (seg) geos.push(rayGeo(seg));
-      } else {
-        // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
-        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
-        if (dense.length) geos.push(pathGeo(dense));
-      }
+      // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
+      var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
+      if (dense.length) geos.push(pathGeo(dense));
     }
     var r = this.size * (0.55 + 0.45 * shade);
     geos.push(geo(DOT, fade(this.color, shade), this.x, this.y, 0.0, r, r));
@@ -787,9 +758,8 @@ setTimeout(function () {
   'use strict';
 
   var core = FW.core, data = FW.data, el = FW.elements;
-  var fade = core.fade, mix = core.mix, decimate = core.decimate, RAD2DEG = core.RAD2DEG;
-  var DOT = data.DOT, RAY = data.RAY, geo = data.geo;
-  var rayGeo = data.rayGeo, pathGeo = data.pathGeo, DENSE = data.DENSE;
+  var fade = core.fade, mix = core.mix, decimate = core.decimate;
+  var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo, DENSE = data.DENSE;
   var Element = el.Element;
 
   /* ------------------------------------------ 弹体：白热的头 + 身后一点火星 */
@@ -875,56 +845,8 @@ setTimeout(function () {
     return segs;
   };
 
-  /* ---------------------------------------- 定线：颜色写死不动的一段折线 */
-
-  /**
-   * 钉在画布上的一段折线，颜色写死不动（复刻原图那两条发射尾迹用），
-   * 到时间整条一起淡出。segs = [[x0, y0, x1, y1, color, 半宽], ...]
-   */
-  function FixedLine(show, segs, o) {
-    Element.call(this, show);
-    this.segs = segs;
-    this.life = (o && o.life !== undefined) ? o.life : 5.0;
-    this.fadePow = (o && o.fadePow !== undefined) ? o.fadePow : 0.7;
-    this.age = 0.0;
-  }
-  FixedLine.prototype = Object.create(Element.prototype);
-  FixedLine.prototype.constructor = FixedLine;
-
-  FixedLine.prototype.update = function (dt) {
-    this.age += dt;
-    if (this.age >= this.life) this.alive = false;
-  };
-
-  FixedLine.prototype.frame = function () {
-    var k = Math.pow(Math.max(0.0, Math.min(1.0, 1.0 - this.age / this.life)), this.fadePow);
-    var geos = [];
-    for (var i = 0; i < this.segs.length; i++) {
-      var s = this.segs[i];
-      var dx = s[2] - s[0], dy = s[3] - s[1];
-      var d = Math.hypot(dx, dy);
-      if (d < 0.5) continue;
-      geos.push(geo(RAY, fade(s[4], k), s[0], s[1], Math.atan2(dy, dx) * RAD2DEG, s[5], d));
-    }
-    return geos;
-  };
-
-  /** 把一条尾迹切成 n 段，给每段算一个渐变颜色（复刻原图用）。 */
-  function stemSegments(p0, p1, c0, c1, half, n) {
-    n = n === undefined ? 8 : n;
-    var segs = [];
-    for (var i = 0; i < n; i++) {
-      var t0 = i / n, t1 = (i + 1) / n;
-      segs.push([p0[0] + (p1[0] - p0[0]) * t0, p0[1] + (p1[1] - p0[1]) * t0,
-                 p0[0] + (p1[0] - p0[0]) * t1, p0[1] + (p1[1] - p0[1]) * t1,
-                 mix(c0, c1, (t0 + t1) * 0.5), half]);
-    }
-    return segs;
-  }
   FW.elements.Rocket = Rocket;
   FW.elements.Trail = Trail;
-  FW.elements.FixedLine = FixedLine;
-  FW.elements.stemSegments = stemSegments;
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/firework.js ===================== */
@@ -1073,7 +995,7 @@ setTimeout(function () {
 /* ===================== src/show.js ===================== */
 /* ============================================================================
  * show.js —— 整场秀：管所有元素，按固定顺序推进一帧
- * 对应 turtle_fireworks.py 的 Show 一节（含 classic / original 两个场景布局）。
+ * 对应 turtle_fireworks.py 的 Show 一节（classic 场景布局）。
  * ---------------------------------------------------------------------------
  * 每帧的固定顺序（与原版一致）：
  *   1) 物理更新（可能产生新元素）
@@ -1088,9 +1010,7 @@ setTimeout(function () {
 
   var data = FW.data, Fw = FW.firework.Firework;
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
-  var STYLE_NAMES = data.STYLE_NAMES, ORIGINAL = data.ORIGINAL;
-  var stemSegments = FW.elements.stemSegments, FixedLine = FW.elements.FixedLine;
-  var Spark = FW.elements.Spark, drawnCost = data.drawnCost;
+  var STYLE_NAMES = data.STYLE_NAMES, drawnCost = data.drawnCost;
 
   //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
   //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
@@ -1164,61 +1084,6 @@ setTimeout(function () {
     this.nextSpawn = 3.2;
   };
 
-  /**
-   * **复刻原版**：完全按参考截图里量出来的坐标/颜色摆出那两发烟花，第一帧与
-   * 参考图一致（?scene=original&still=1 可以直接出对比图），之后火花照常往外
-   * 飞、下坠、变暗，画面就活起来了。
-   */
-  Show.prototype.originalScene = function () {
-    var t0 = this.time, rng = this.rng, i, dx, dy, ang, rad;
-
-    // ---- 左：红射线 + 黄圆点 ------------------------------------------
-    var cx = ORIGINAL.LEFT_CENTER[0], cy = ORIGINAL.LEFT_CENTER[1];
-    for (i = 0; i < ORIGINAL.LEFT_DOTS.length; i++) {
-      dx = ORIGINAL.LEFT_DOTS[i][0]; dy = ORIGINAL.LEFT_DOTS[i][1];
-      ang = Math.atan2(dy - cy, dx - cx);
-      rad = Math.hypot(dx - cx, dy - cy);
-      var sp = new Spark(this, dx, dy, Math.cos(ang) * rad * 1.2, Math.sin(ang) * rad * 1.2, {
-        color: ORIGINAL.YELLOW,
-        trailHot: ORIGINAL.RAY,             // 原图里射线是均匀的纯红
-        trailCool: ORIGINAL.RAY,
-        size: ORIGINAL.DOT_R,
-        life: rng.uniform(2.4, 3.0),
-        gravity: 95.0, drag: 5.0,
-        trailTime: 1e9,                     // 整条射线一直保留
-        trailSeg: 1,                        // 一段直线：爆心 -> 圆点
-        trailStep: 1e9                      // 中间不再采样
-      });
-      // 预先把「爆心 -> 圆点」这段路径塞进轨迹，第一帧就是一条直线
-      sp.track = [[cx, cy, t0], [dx, dy, t0]];
-      this.add(sp);
-    }
-
-    // ---- 右：绿圆点云团 ----------------------------------------------
-    var bx = ORIGINAL.RIGHT_STEM[1][0], by = ORIGINAL.RIGHT_STEM[1][1];
-    for (i = 0; i < ORIGINAL.RIGHT_DOTS.length; i++) {
-      dx = ORIGINAL.RIGHT_DOTS[i][0]; dy = ORIGINAL.RIGHT_DOTS[i][1];
-      ang = Math.atan2(dy - by, dx - bx);
-      rad = Math.hypot(dx - bx, dy - by);
-      this.add(new Spark(this, dx, dy, Math.cos(ang) * rad * 1.1, Math.sin(ang) * rad * 1.1, {
-        color: ORIGINAL.GREEN,
-        trailHot: ORIGINAL.GREEN, trailCool: ORIGINAL.GREEN,
-        size: ORIGINAL.DOT_R,
-        life: rng.uniform(2.6, 3.6),
-        gravity: 70.0, drag: 2.6
-      }));
-    }
-
-    // ---- 两条发射尾迹 ------------------------------------------------
-    this.add(new FixedLine(this, stemSegments(
-      ORIGINAL.LEFT_STEM[0], ORIGINAL.LEFT_STEM[1],
-      ORIGINAL.STEM_LEFT[0], ORIGINAL.STEM_LEFT[1], ORIGINAL.STEM_HALF[0]), { life: 5.5 }));
-    this.add(new FixedLine(this, stemSegments(
-      ORIGINAL.RIGHT_STEM[0], ORIGINAL.RIGHT_STEM[1],
-      ORIGINAL.STEM_RIGHT[0], ORIGINAL.STEM_RIGHT[1], ORIGINAL.STEM_HALF[1]), { life: 5.5 }));
-    this.nextSpawn = 5.5;                   // 先静静看几秒原版
-  };
-
   /* -------------------------------------------------------------- 每帧 */
 
   Show.prototype.step = function (dt) {
@@ -1261,10 +1126,9 @@ setTimeout(function () {
     }
   };
 
-  /** 开场：original=按截图实测坐标复刻；classic=参考图风格开场后继续随机；random=纯随机。 */
+  /** 开场：classic=参考图风格（左右两发的配色/花型）；random=纯随机。 */
   function build(show, scene) {
-    if (scene === 'original') show.originalScene();
-    else if (scene === 'classic') show.classicOpening();
+    if (scene === 'classic') show.classicOpening();
     else show.spawnRandom(2);
   }
 
@@ -1290,7 +1154,7 @@ setTimeout(function () {
   'use strict';
 
   var core = FW.core, data = FW.data;
-  var DOT = data.DOT, PATH = data.PATH, DOT_PTS = data.DOT_PTS, RAY_PTS = data.RAY_PTS;
+  var DOT = data.DOT, PATH = data.PATH, DOT_PTS = data.DOT_PTS;
   var toHex = core.toHex, RAD2DEG = core.RAD2DEG;
 
   /**
@@ -1375,27 +1239,15 @@ setTimeout(function () {
                      s * cs * this.dpr, -s * sn * this.dpr,
                      (this.ox + s * g.x) * this.dpr, (this.oy - s * g.y) * this.dpr);
     ctx.fillStyle = toHex(g.color);
-    var pts, i, X, Y;
-    if (g.shape === DOT) {
-      pts = DOT_PTS;
-      ctx.beginPath();
-      for (i = 0; i < pts.length; i++) {
-        X = pts[i][0] * g.wid; Y = pts[i][1] * g.leng;
-        if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
-      }
-      ctx.closePath();
-      ctx.fill();
-    } else {
-      // 单位线段：x∈[-1,1] 是粗细，y∈[0,1] 是长度
-      X = g.wid; Y = g.leng;
-      ctx.beginPath();
-      ctx.moveTo(RAY_PTS[0][0] * X, RAY_PTS[0][1] * Y);
-      ctx.lineTo(RAY_PTS[1][0] * X, RAY_PTS[1][1] * Y);
-      ctx.lineTo(RAY_PTS[2][0] * X, RAY_PTS[2][1] * Y);
-      ctx.lineTo(RAY_PTS[3][0] * X, RAY_PTS[3][1] * Y);
-      ctx.closePath();
-      ctx.fill();
+    // 圆点：正 18 边形（半径 1）按 (wid, leng) 缩放；DOT_PTS 就是 turtle 那份形状表
+    var pts = DOT_PTS, i, X, Y;
+    ctx.beginPath();
+    for (i = 0; i < pts.length; i++) {
+      X = pts[i][0] * g.wid; Y = pts[i][1] * g.leng;
+      if (i === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
     }
+    ctx.closePath();
+    ctx.fill();
   };
 
   /** 导出 PNG 用的 dataURL（浏览器 Canvas 自带，不用手写 zlib/PNG）。 */
@@ -1422,13 +1274,24 @@ setTimeout(function () {
   var FIXED_DT = 1 / 60;                 // 固定步长（= 原版离线渲染的 60fps）
   var MAX_STEPS = 4;                     // 单帧最多追几步
   var DT_CLAMP = 0.06;                   // 单帧最多推进 60ms（同原版）
-  var ORIGINAL = FW.data.ORIGINAL;
 
   var SCENES = {
-    classic: ['参考图风格', '按参考图的配色/花型开场，随后继续随机放'],
-    random: ['纯随机', '全部程序化随机生成的一场烟花秀'],
-    original: ['原版复刻', '按截图实测坐标/颜色摆出那两发烟花（可与参考图逐帧对比）']
+    classic: ['参考图风格', '左右两发照参考图的配色/花型开场，随后继续随机放'],
+    random: ['纯随机', '全部程序化随机生成的一场烟花秀']
   };
+
+  /** 种子统一成大写去空格：字母码好念也好分享（KQXW 与 kqxw 是同一场）。 */
+  function normalizeSeed(s) { return String(s).trim().toUpperCase(); }
+
+  /**
+   * 场景由**种子形态**决定（也是个彩蛋）：
+   *   字母种子 -> 参考图风格；数字种子 -> 纯随机秀。
+   * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
+   */
+  function sceneForSeed(seed, sceneParam) {
+    if (SCENES[sceneParam]) return sceneParam;
+    return FW.rng.isNumericSeed(seed) ? 'random' : 'classic';
+  }
 
   /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
   function App(opts) {
@@ -1436,9 +1299,11 @@ setTimeout(function () {
     this.canvas = opts.canvas;
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    this.scene = SCENES[q.get('scene')] ? q.get('scene') : 'classic';
-    this.seed = parseInt(q.get('seed'), 10);
-    if (!(this.seed >= 0)) this.seed = FW.rng.defaultSeed();
+    // 不给种子就随机发一个**字母**种子 —— 于是默认开场就是参考图风格，而且
+    // HUD 与控制台里那个字母码本身就是可以分享/复现的彩蛋。
+    this.seed = normalizeSeed(q.get('seed') || '') || FW.rng.randomLetters(4);
+    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -1485,7 +1350,6 @@ setTimeout(function () {
     var ch = this.canvas.clientHeight || this.canvas.height || 1;
     var lw, lh;
     if (this.forceW && this.forceH) { lw = this.forceW; lh = this.forceH; }
-    else if (this.scene === 'original') { lw = ORIGINAL.W; lh = ORIGINAL.H; }
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
@@ -1500,22 +1364,23 @@ setTimeout(function () {
     this.renderer.layout(this.show.w, this.show.h);
   };
 
-  /** 换场景 / 换种子 / 重放：整场重开（URL 里的定格帧只在首次加载生效）。 */
+  /**
+   * 换种子 / 换场景 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
+   * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
+   */
   App.prototype.rebuild = function (scene, seed) {
-    if (scene !== undefined && scene !== null) this.scene = scene;
-    if (seed !== undefined && seed !== null) this.seed = seed;
+    if (seed !== undefined && seed !== null) this.seed = normalizeSeed(seed);
+    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 定格成参考图那一帧（第 1 帧）。 */
-  App.prototype.stillFrame = function () {
-    this.rebuild('original', this.seed);
-    this.show.step(0.0);
-    this.paused = true;
-    this.syncPanel();
+  /** 随机换一个种子：letters=true 给字母种子（参考图风格），false 给数字种子（纯随机）。 */
+  App.prototype.reseed = function (letters) {
+    this.rebuild(undefined, letters ? FW.rng.randomLetters(4) : FW.rng.defaultSeed());
   };
 
   /* --------------------------------------------------------------- 主循环 */
@@ -1573,8 +1438,7 @@ setTimeout(function () {
     var cw = this.canvas.clientWidth || this.canvas.width || 1;
     var ch = this.canvas.clientHeight || this.canvas.height || 1;
     if (cw === this.renderer.cw && ch === this.renderer.ch) return;
-    var pinned = (this.forceW && this.forceH) || this.scene === 'original';
-    if (!pinned) { this.show.w = cw; this.show.h = ch; }
+    if (!(this.forceW && this.forceH)) { this.show.w = cw; this.show.h = ch; }
     this.renderer.layout(this.show.w, this.show.h);
   };
 
@@ -1591,7 +1455,7 @@ setTimeout(function () {
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT };
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, sceneForSeed: sceneForSeed };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/ui.js ===================== */
@@ -1631,12 +1495,12 @@ setTimeout(function () {
 
   /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
-    $('scene').value = this.scene;
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
-    $('scene-help').textContent = SCENES[this.scene][1];
+    $('scene-help').textContent = SCENES[this.scene][1]
+      + '（' + (this.letterSeed ? '字母种子' : '数字种子') + ' → ' + SCENES[this.scene][0] + '）';
     document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
     this.applyUiVisibility();
     this.hud();
@@ -1669,17 +1533,14 @@ setTimeout(function () {
 
   FW.app.App.prototype.bindPanel = function () {
     var self = this;
-    $('scene').addEventListener('change', function () { self.rebuild(this.value, null); });
+    // 种子改成"能打字母"：字母 -> 参考图风格，数字 -> 纯随机（场景由种子形态决定）
     $('seed').addEventListener('change', function () {
-      var v = parseInt(this.value, 10);
-      self.rebuild(null, (v >= 0) ? v : FW.rng.defaultSeed());
+      self.rebuild(undefined, this.value || FW.rng.randomLetters(4));
     });
-    $('dice').addEventListener('click', function () {
-      self.rebuild(null, FW.rng.defaultSeed());
-    });
+    $('dice-letters').addEventListener('click', function () { self.reseed(true); });
+    $('dice-number').addEventListener('click', function () { self.reseed(false); });
     $('pause').addEventListener('click', function () { self.togglePause(); });
     $('extra').addEventListener('click', function () { self.extra(); });
-    $('still').addEventListener('click', function () { self.stillFrame(); });
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
@@ -1711,6 +1572,23 @@ setTimeout(function () {
 
   /* --------------------------------------------------------------- 启动 */
 
+  /**
+   * 控制台彩蛋：把规则和当前种子打出来。数字种子时再随机发一个字母种子当提示
+   * （用 Math.random，不碰演出用的 RNG）。已经用字母种子的就不再剧透。
+   */
+  function consoleEgg(app) {
+    var gold = 'color:#ffd34d;font-weight:600';
+    var cyan = 'color:#7fd1ff;font-weight:600';
+    console.log('%c烟花 · Canvas 维护版', gold);
+    console.log('本场 seed: %c' + app.seed + '%c  （' + (app.letterSeed
+      ? '字母种子 → 参考图风格'
+      : '数字种子 → 纯随机秀') + '）', cyan, 'color:inherit');
+    if (!app.letterSeed) {
+      console.log('彩蛋：种子换成字母，开场就是参考图风格那一发 —— 试试 %c?seed='
+        + FW.rng.randomLetters(4), gold);
+    }
+  }
+
   function boot() {
     var inst = new FW.app.App({
       canvas: $('stage'),
@@ -1718,6 +1596,7 @@ setTimeout(function () {
     });
     FW.app.instance = inst;
     inst.start();
+    consoleEgg(inst);
   }
 
   if (document.readyState === 'loading') {
