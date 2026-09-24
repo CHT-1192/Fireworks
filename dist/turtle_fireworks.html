@@ -48,6 +48,11 @@
   button:hover { background: rgba(140, 170, 255, .18); border-color: rgba(160, 190, 255, .45); }
   button:active { transform: translateY(1px); }
   button.mini { font-size: 11.5px; padding: 6px 2px; }
+  /* 「每日」是个开关：亮着 = 这一场会跟着日期走（跨日自动换成新的一天） */
+  button[aria-pressed="true"] {
+    background: rgba(255, 211, 77, .14); border-color: rgba(255, 211, 77, .55);
+    color: #ffd98a;
+  }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
   button:focus-visible { border-color: rgba(255, 211, 77, .6); }
 
@@ -133,7 +138,8 @@
     <span class="lab">种子</span>
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
     <button id="dice-number" class="mini" title="随机换一个数字种子">随机</button>
-    <button id="daily" class="mini" title="今天这一场（同一天永远是同一个种子）">每日</button>
+    <button id="daily" class="mini" aria-pressed="false"
+            title="回到今天这一场，并跟着日期自动更新">每日</button>
   </div>
   <p class="help">配色、花型、位置全随机</p>
 
@@ -1378,6 +1384,7 @@ setTimeout(function () {
    * opts = { canvas, search, store }
    *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
    *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
+   * 存储里两个键：`seed` = 这一场的数字种子，`daily` = '1' 表示这一场跟着日期走。
    * 构造完不会自己开跑，需 start()。
    */
   function App(opts) {
@@ -1386,20 +1393,25 @@ setTimeout(function () {
     this.store = opts.store || { get: function () { return null; }, set: function () {} };
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。三处都只认数字，那个词不是
-    // 种子（它只在种子框里被敲对的那一刻插播两发，见 interlude()）。
+    // 种子的来源顺序：URL -> "每日"这个模式 -> 上次用过的 -> 今天这一场。都只认数字；
+    // 那个词不是种子（它只在种子框里被敲对的那一刻插播两发，见 interlude()）。
     var raw = seedFromRaw(q.get('seed'));
-    if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
-    else {
-      var kept = this.store.get('seed');
+    var kept = this.store.get('seed');
+    if (raw) {
+      this.dailyMode = false;              // 链接里明确给了种子 = 钉住那一场，不跟日期走
+    } else if (this.store.get('daily') === '1') {
+      raw = String(FW.rng.dailySeed());    // 上次就在"每日"：那今天就放今天这一场
+      this.dailyMode = true;
+    } else {
       raw = seedFromRaw(kept);
       // 更早的版本把那个词当种子存过（fw.seed=FIREWORKS）：认不出来就顺手抹掉，
       // 别让它留在浏览器存储里 —— 那也是会被翻出来的地方。
-      if (!raw && kept) this.store.set('seed', String(FW.rng.dailySeed()));
+      this.dailyMode = !raw;               // 第一次来（没有可用种子）：今天这一场 + 每日
+      if (!raw) raw = String(FW.rng.dailySeed());
     }
-    if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.eggFound = false;               // 那个词只在本场被敲对时置位，不进 URL/存储
     this.seed = raw;
+    this.persistSeed();
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -1438,6 +1450,7 @@ setTimeout(function () {
   App.prototype.bindPanel = function () {};
   App.prototype.bindKeys = function () {};
   App.prototype.onError = function (err) { console.error(err); };
+  App.prototype.onDayRoll = function () {};      // "每日"跨日自动换场后通知 UI
 
   /* ------------------------------------------------------------ 构建 / 重开 */
 
@@ -1460,25 +1473,50 @@ setTimeout(function () {
     this.renderer.layout(this.show.w, this.show.h);
   };
 
+  /** 把"这一场"和"每日"开关一起落盘（存储被禁用时 store 自己吞掉异常）。 */
+  App.prototype.persistSeed = function () {
+    this.store.set('seed', this.seed);
+    this.store.set('daily', this.dailyMode ? '1' : '0');
+  };
+
   /**
    * 换种子 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
-   * 种子认不出来就换一个数字种子。
+   * seed 认不出来就换一个数字种子；daily 传 true/false 会切换"每日"开关，
+   * 不传（重放）就保持原样。所以种子框里敲数字 = 钉住那一场，退出"每日"。
    */
-  App.prototype.rebuild = function (seed) {
+  App.prototype.rebuild = function (seed, daily) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
       if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
       this.seed = raw;
-      this.store.set('seed', raw);
     }
+    if (daily !== undefined) this.dailyMode = !!daily;
+    this.persistSeed();
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 随机换一个数字种子。 */
-  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed()); };
+  /** 随机换一个数字种子（钉住这一场，退出"每日"）。 */
+  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed(), false); };
+
+  /** 跳到"今天这一场"，并进入"每日"：以后每天都会自动换成当天那一场。 */
+  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed(), true); };
+
+  /**
+   * 跨日检测（只在"每日"模式下有意义）：日期一过就自己换成新一天那一场。
+   * 由主循环每 500ms 那一拍调用；标签页在后台时 rAF 本来就停着，回到前台时补上。
+   * 暂停中（或 ?frames= 定格中）不打扰 —— 解除暂停后的第一拍就会换。
+   */
+  App.prototype.checkDay = function () {
+    if (!this.dailyMode || this.paused || this.freezeFrames !== null) return false;
+    var today = String(FW.rng.dailySeed());
+    if (today === this.seed) return false;
+    this.rebuild(today, true);             // 换天的同时保持"每日"
+    this.onDayRoll(this.seed);
+    return true;
+  };
 
   /**
    * 插播：往**正在放的**这场里塞两发参考图风格（那个词刚被敲对时调用）。
@@ -1537,6 +1575,7 @@ setTimeout(function () {
       this.fps = this.frames * 1000 / (now - this.fpsT);
       this.frames = 0;
       this.fpsT = now;
+      this.checkDay();          // "每日"模式下跨日了：自己换成今天这一场
       this.hud();
     }
   };
@@ -1571,9 +1610,6 @@ setTimeout(function () {
     var y = (r.oy - (clientY - rect.top)) / r.scale;
     return this.show.launchAt(x, y);
   };
-
-  /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
-  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed()); };
 
   /**
    * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）
@@ -2183,15 +2219,28 @@ setTimeout(function () {
     }
   };
 
-  /** 把内部状态刷到控件上（换种子 / 插播 / 暂停后调用）。 */
+  /** 把内部状态刷到控件上（换种子 / 插播 / 跨日 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
+    // 「每日」是个开关：亮着 = 这一场会跟着日期自动换（每天零点后自己变成新的一天）
+    var d = $('daily');
+    if (d) {
+      d.setAttribute('aria-pressed', this.dailyMode ? 'true' : 'false');
+      d.title = this.dailyMode
+        ? '今日这一场（已开启：跨日会自己换成新的一天）'
+        : '回到今天这一场，并跟着日期自动更新';
+    }
     document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
+  };
+
+  /** "每日"模式下跨日自动换场了：在控制台说一声，别打断画面。 */
+  FW.app.App.prototype.onDayRoll = function (seed) {
+    console.log('%c跨日 —— 换成今天的这一场', 'color:#7fd1ff;font-weight:600', 'seed ' + seed);
   };
 
   FW.app.App.prototype.applyUiVisibility = function () {
@@ -2262,7 +2311,7 @@ setTimeout(function () {
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(this.value);
+      if (/^\d+$/.test(this.value)) self.rebuild(this.value, false);   // 敲数字 = 钉住这一场
       else if (this.value === '') self.reseed();
     });
   };
@@ -2328,14 +2377,14 @@ setTimeout(function () {
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
     console.log('%c烟花 · Fireworks', gold);
-    console.log('seed %c' + app.seed, cyan);
+    console.log('seed %c' + app.seed + (app.dailyMode ? '（每日：跟着日期走）' : ''), cyan);
     if (app.eggFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
       + ' 个字母%c的词是例外 —— 一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记一下上次的种子（隐私模式下可能直接抛错，所以都包起来）。 */
+  /** localStorage 里记两个键：上次的种子，和"每日"这个开关（隐私模式下会抛错，所以都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },

@@ -43,6 +43,7 @@
    * opts = { canvas, search, store }
    *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
    *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
+   * 存储里两个键：`seed` = 这一场的数字种子，`daily` = '1' 表示这一场跟着日期走。
    * 构造完不会自己开跑，需 start()。
    */
   function App(opts) {
@@ -51,20 +52,25 @@
     this.store = opts.store || { get: function () { return null; }, set: function () {} };
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。三处都只认数字，那个词不是
-    // 种子（它只在种子框里被敲对的那一刻插播两发，见 interlude()）。
+    // 种子的来源顺序：URL -> "每日"这个模式 -> 上次用过的 -> 今天这一场。都只认数字；
+    // 那个词不是种子（它只在种子框里被敲对的那一刻插播两发，见 interlude()）。
     var raw = seedFromRaw(q.get('seed'));
-    if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
-    else {
-      var kept = this.store.get('seed');
+    var kept = this.store.get('seed');
+    if (raw) {
+      this.dailyMode = false;              // 链接里明确给了种子 = 钉住那一场，不跟日期走
+    } else if (this.store.get('daily') === '1') {
+      raw = String(FW.rng.dailySeed());    // 上次就在"每日"：那今天就放今天这一场
+      this.dailyMode = true;
+    } else {
       raw = seedFromRaw(kept);
       // 更早的版本把那个词当种子存过（fw.seed=FIREWORKS）：认不出来就顺手抹掉，
       // 别让它留在浏览器存储里 —— 那也是会被翻出来的地方。
-      if (!raw && kept) this.store.set('seed', String(FW.rng.dailySeed()));
+      this.dailyMode = !raw;               // 第一次来（没有可用种子）：今天这一场 + 每日
+      if (!raw) raw = String(FW.rng.dailySeed());
     }
-    if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.eggFound = false;               // 那个词只在本场被敲对时置位，不进 URL/存储
     this.seed = raw;
+    this.persistSeed();
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -103,6 +109,7 @@
   App.prototype.bindPanel = function () {};
   App.prototype.bindKeys = function () {};
   App.prototype.onError = function (err) { console.error(err); };
+  App.prototype.onDayRoll = function () {};      // "每日"跨日自动换场后通知 UI
 
   /* ------------------------------------------------------------ 构建 / 重开 */
 
@@ -125,25 +132,50 @@
     this.renderer.layout(this.show.w, this.show.h);
   };
 
+  /** 把"这一场"和"每日"开关一起落盘（存储被禁用时 store 自己吞掉异常）。 */
+  App.prototype.persistSeed = function () {
+    this.store.set('seed', this.seed);
+    this.store.set('daily', this.dailyMode ? '1' : '0');
+  };
+
   /**
    * 换种子 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
-   * 种子认不出来就换一个数字种子。
+   * seed 认不出来就换一个数字种子；daily 传 true/false 会切换"每日"开关，
+   * 不传（重放）就保持原样。所以种子框里敲数字 = 钉住那一场，退出"每日"。
    */
-  App.prototype.rebuild = function (seed) {
+  App.prototype.rebuild = function (seed, daily) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
       if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
       this.seed = raw;
-      this.store.set('seed', raw);
     }
+    if (daily !== undefined) this.dailyMode = !!daily;
+    this.persistSeed();
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 随机换一个数字种子。 */
-  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed()); };
+  /** 随机换一个数字种子（钉住这一场，退出"每日"）。 */
+  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed(), false); };
+
+  /** 跳到"今天这一场"，并进入"每日"：以后每天都会自动换成当天那一场。 */
+  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed(), true); };
+
+  /**
+   * 跨日检测（只在"每日"模式下有意义）：日期一过就自己换成新一天那一场。
+   * 由主循环每 500ms 那一拍调用；标签页在后台时 rAF 本来就停着，回到前台时补上。
+   * 暂停中（或 ?frames= 定格中）不打扰 —— 解除暂停后的第一拍就会换。
+   */
+  App.prototype.checkDay = function () {
+    if (!this.dailyMode || this.paused || this.freezeFrames !== null) return false;
+    var today = String(FW.rng.dailySeed());
+    if (today === this.seed) return false;
+    this.rebuild(today, true);             // 换天的同时保持"每日"
+    this.onDayRoll(this.seed);
+    return true;
+  };
 
   /**
    * 插播：往**正在放的**这场里塞两发参考图风格（那个词刚被敲对时调用）。
@@ -202,6 +234,7 @@
       this.fps = this.frames * 1000 / (now - this.fpsT);
       this.frames = 0;
       this.fpsT = now;
+      this.checkDay();          // "每日"模式下跨日了：自己换成今天这一场
       this.hud();
     }
   };
@@ -236,9 +269,6 @@
     var y = (r.oy - (clientY - rect.top)) / r.scale;
     return this.show.launchAt(x, y);
   };
-
-  /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
-  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed()); };
 
   /**
    * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）

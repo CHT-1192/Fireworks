@@ -42,6 +42,11 @@
   button:hover { background: rgba(140, 170, 255, .18); border-color: rgba(160, 190, 255, .45); }
   button:active { transform: translateY(1px); }
   button.mini { font-size: 11.5px; padding: 6px 2px; }
+  /* 「每日」是个开关：亮着 = 这一场会跟着日期走（跨日自动换成新的一天） */
+  button[aria-pressed="true"] {
+    background: rgba(255, 211, 77, .14); border-color: rgba(255, 211, 77, .55);
+    color: #ffd98a;
+  }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
   button:focus-visible { border-color: rgba(255, 211, 77, .6); }
 
@@ -127,7 +132,8 @@
     <span class="lab">种子</span>
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
     <button id="dice-number" class="mini" title="随机换一个数字种子">随机</button>
-    <button id="daily" class="mini" title="今天这一场（同一天永远是同一个种子）">每日</button>
+    <button id="daily" class="mini" aria-pressed="false"
+            title="回到今天这一场，并跟着日期自动更新">每日</button>
   </div>
   <p class="help">配色、花型、位置全随机</p>
 

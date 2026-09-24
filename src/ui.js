@@ -34,15 +34,28 @@
     }
   };
 
-  /** 把内部状态刷到控件上（换种子 / 插播 / 暂停后调用）。 */
+  /** 把内部状态刷到控件上（换种子 / 插播 / 跨日 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
+    // 「每日」是个开关：亮着 = 这一场会跟着日期自动换（每天零点后自己变成新的一天）
+    var d = $('daily');
+    if (d) {
+      d.setAttribute('aria-pressed', this.dailyMode ? 'true' : 'false');
+      d.title = this.dailyMode
+        ? '今日这一场（已开启：跨日会自己换成新的一天）'
+        : '回到今天这一场，并跟着日期自动更新';
+    }
     document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
+  };
+
+  /** "每日"模式下跨日自动换场了：在控制台说一声，别打断画面。 */
+  FW.app.App.prototype.onDayRoll = function (seed) {
+    console.log('%c跨日 —— 换成今天的这一场', 'color:#7fd1ff;font-weight:600', 'seed ' + seed);
   };
 
   FW.app.App.prototype.applyUiVisibility = function () {
@@ -113,7 +126,7 @@
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(this.value);
+      if (/^\d+$/.test(this.value)) self.rebuild(this.value, false);   // 敲数字 = 钉住这一场
       else if (this.value === '') self.reseed();
     });
   };
@@ -179,14 +192,14 @@
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
     console.log('%c烟花 · Fireworks', gold);
-    console.log('seed %c' + app.seed, cyan);
+    console.log('seed %c' + app.seed + (app.dailyMode ? '（每日：跟着日期走）' : ''), cyan);
     if (app.eggFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
       + ' 个字母%c的词是例外 —— 一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记一下上次的种子（隐私模式下可能直接抛错，所以都包起来）。 */
+  /** localStorage 里记两个键：上次的种子，和"每日"这个开关（隐私模式下会抛错，所以都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },

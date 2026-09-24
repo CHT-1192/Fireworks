@@ -244,6 +244,82 @@ const kept = new App({ canvas: makeFakeCanvas(924, 691).canvas,
 if (kept.seed !== '42' || keptStore.data.seed !== '42') {
   loopProblems.push(`上次的种子没被沿用：${kept.seed} / ${keptStore.data.seed}`);
 }
+if (kept.dailyMode) loopProblems.push('上次是明确选的种子，不该算"每日"');
+
+// 2.4d "每日"是个跟着日期走的开关（存 fw.daily）：
+//   * 第一次来 -> 今天这一场 + 开关打开
+//   * 开关开着 + 昨天存下的种子 -> 换成今天这一场（这就是"自动更新"）
+//   * 开关关着 -> 老老实实放上次那一场
+//   * URL 里明确给了种子 -> 钉住那一场，开关关上
+//   * 运行中跨日 -> 自己换场，并且仍然是"每日"
+const realDaily = FW.rng.dailySeed;
+const firstStore = fakeStore({});
+const first = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                        search: new URLSearchParams('w=924&h=691'), store: firstStore });
+if (!first.dailyMode) loopProblems.push('第一次来应该进入"每日"');
+if (first.seed !== String(realDaily())) loopProblems.push(`第一次来应放今天这一场，实际 ${first.seed}`);
+if (firstStore.data.daily !== '1' || firstStore.data.seed !== first.seed) {
+  loopProblems.push(`"每日"开关没落盘：${JSON.stringify(firstStore.data)}`);
+}
+
+// 开关开着，但存的是"昨天"那一场：开机就该换成今天这一场
+FW.rng.dailySeed = () => 111111;                    // 假装"今天"是 111111
+const staleDailyStore = fakeStore({ seed: '222222', daily: '1' });
+const rolled = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                         search: new URLSearchParams('w=924&h=691'), store: staleDailyStore });
+if (rolled.seed !== '111111' || !rolled.dailyMode) {
+  loopProblems.push(`"每日"没跟着日期换场：seed ${rolled.seed} / daily ${rolled.dailyMode}`);
+}
+if (staleDailyStore.data.seed !== '111111') {
+  loopProblems.push('换场后没把新种子落盘：' + staleDailyStore.data.seed);
+}
+
+// 运行中跨日：checkDay() 自己换场，换完仍然是"每日"
+FW.rng.dailySeed = () => 333333;
+const rolledLive = rolled.checkDay();
+if (!rolledLive || rolled.seed !== '333333' || !rolled.dailyMode) {
+  loopProblems.push(`跨日没有自动换场：${rolledLive} / ${rolled.seed} / ${rolled.dailyMode}`);
+}
+if (rolled.checkDay()) loopProblems.push('同一天里不该反复换场');
+// 暂停中不打扰；解除暂停后的第一拍才换
+FW.rng.dailySeed = () => 444444;
+rolled.paused = true;
+if (rolled.checkDay() || rolled.seed !== '333333') {
+  loopProblems.push('暂停中不该自动换场');
+}
+rolled.paused = false;
+if (!rolled.checkDay() || rolled.seed !== '444444') {
+  loopProblems.push('解除暂停后应该换到新的一天');
+}
+FW.rng.dailySeed = () => 333333;
+
+// 开关关着 / URL 明确给了种子：都不跟日期走
+const pinnedStore = fakeStore({ seed: '42', daily: '0' });
+const pinned = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                         search: new URLSearchParams('w=924&h=691'), store: pinnedStore });
+if (pinned.seed !== '42' || pinned.dailyMode) {
+  loopProblems.push(`开关关着不该换场：${pinned.seed} / ${pinned.dailyMode}`);
+}
+const fromUrlStore = fakeStore({ seed: '222222', daily: '1' });
+const fromUrl = new App({ canvas: makeFakeCanvas(924, 691).canvas,
+                          search: new URLSearchParams('seed=42&w=924&h=691'), store: fromUrlStore });
+if (fromUrl.seed !== '42' || fromUrl.dailyMode || fromUrlStore.data.daily !== '0') {
+  loopProblems.push(`URL 明确给的种子应当钉住：${fromUrl.seed} / ${fromUrl.dailyMode}`);
+}
+// 「随机」和「每日」按钮分别关掉 / 打开这个开关
+pinned.reseed();
+if (pinned.dailyMode || pinnedStore.data.daily !== '0') loopProblems.push('「随机」没有关掉"每日"');
+pinned.daily();
+if (!pinned.dailyMode || pinnedStore.data.daily !== '1') loopProblems.push('「每日」没有打开开关');
+// 重放不改开关（只是从头再放一遍）
+pinned.rebuild(pinned.seed);
+if (!pinned.dailyMode) loopProblems.push('「重放」不该关掉"每日"');
+// 插播也不改开关
+pinned.interlude();
+if (!pinned.dailyMode || pinned.seed !== '333333') {
+  loopProblems.push(`插播不该动"每日"或种子：${pinned.dailyMode} / ${pinned.seed}`);
+}
+FW.rng.dailySeed = realDaily;                       // 还原真实时钟
 
 // 逐字符守卫（种子框只允许"数字"或"密语的正确前缀"）—— 彩蛋就靠它做反馈
 const wrongFirst = (SECRET[0] === 'Q') ? 'Z' : 'Q';
@@ -284,7 +360,7 @@ if (loopProblems.length) {
   for (const p of loopProblems) console.log('  ✗ ' + p);
 } else {
   console.log(`  OK   定格 (N-1)/60 秒、60 帧推进 ${advanced.toFixed(3)}s、暂停不走、异常被兜住`);
-  console.log(`  OK   数字种子照收、那个词不是种子、插播只多 2 发且不进链接、逐字符守卫 ${okTexts.length} 收 / ${badTexts.length} 拒、可复现`);
+  console.log(`  OK   数字种子照收、那个词不是种子、插播只多 2 发且不进链接/存储、逐字符守卫 ${okTexts.length} 收 / ${badTexts.length} 拒、"每日"开关跟着日期走、可复现`);
 }
 console.log('─'.repeat(76));
 for (const p of loopProblems) problems.push(p);

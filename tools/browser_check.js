@@ -421,12 +421,52 @@ async function checkInteract(browser) {
   }
   steps.push(`点 (600,300) -> 落点 ${hit ? hit.x + ',' + hit.y : '无'}`);
 
-  // D2) 每日按钮 = 当天种子
+  // D2) 每日按钮 = 当天种子，而且是个开关（fw.daily 落盘 + 按钮亮起）
   await page.click('#daily');
-  const daily = await page.evaluate(() => ({ got: FW.app.instance.seed,
-                                             want: String(FW.rng.dailySeed()) }));
+  const daily = await page.evaluate(() => ({
+    got: FW.app.instance.seed,
+    want: String(FW.rng.dailySeed()),
+    mode: FW.app.instance.dailyMode,
+    flag: localStorage.getItem('fw.daily'),
+    pressed: document.getElementById('daily').getAttribute('aria-pressed')
+  }));
   if (daily.got !== daily.want) problems.push(`每日没跳到当天种子：${daily.got} != ${daily.want}`);
-  steps.push(`每日 -> seed ${daily.got}`);
+  if (!daily.mode || daily.flag !== '1' || daily.pressed !== 'true') {
+    problems.push(`按「每日」后开关没打开：${JSON.stringify(daily)}`);
+  }
+  steps.push(`每日 -> seed ${daily.got}（开关 ${daily.flag}/${daily.pressed}）`);
+
+  // D2b) 开关开着时，带着"昨天"的种子重开页面 -> 自动换成今天这一场
+  //      （要开不带 ?seed= 的地址：链接里明确给了种子就是钉住那一场，不跟日期走）
+  await page.evaluate(() => { localStorage.setItem('fw.seed', '123456'); });
+  await page.goto(BASE + '/', { waitUntil: 'load' });
+  const rolled = await page.evaluate(() => ({
+    seed: FW.app.instance.seed,
+    want: String(FW.rng.dailySeed()),
+    pressed: document.getElementById('daily').getAttribute('aria-pressed')
+  }));
+  if (rolled.seed !== rolled.want) {
+    problems.push(`"每日"没跟着日期换场：${rolled.seed} != ${rolled.want}`);
+  }
+  if (rolled.pressed !== 'true') problems.push('跨日换场后开关被关掉了');
+  // 换成明确种子（「随机」）就退出这个模式
+  await page.click('#dice-number');
+  const pinned = await page.evaluate(() => ({
+    mode: FW.app.instance.dailyMode,
+    flag: localStorage.getItem('fw.daily'),
+    pressed: document.getElementById('daily').getAttribute('aria-pressed')
+  }));
+  if (pinned.mode || pinned.flag !== '0' || pinned.pressed !== 'false') {
+    problems.push(`按「随机」后该退出"每日"：${JSON.stringify(pinned)}`);
+  }
+  steps.push(`存档种子重开 -> ${rolled.seed}（跟着日期走）；随机 -> 开关 ${pinned.flag}`);
+
+  // D2c) 回到"每日"，后面的 D3/D4 才有稳定的种子可比
+  await page.click('#daily');
+  const backToDaily = await page.evaluate(() => FW.app.instance.seed);
+  if (backToDaily !== String(await page.evaluate(() => FW.rng.dailySeed()))) {
+    problems.push('回到「每日」失败：' + backToDaily);
+  }
 
   // D3) 复制链接：剪贴板里要有能复现这一场的地址
   await page.click('#share');
