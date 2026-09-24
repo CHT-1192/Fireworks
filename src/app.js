@@ -50,17 +50,26 @@
     return seed === SECRET ? 'classic' : 'random';
   }
 
-  /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
+  /**
+   * opts = { canvas, search, store }
+   *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
+   *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
+   * 构造完不会自己开跑，需 start()。
+   */
   function App(opts) {
     var q = opts.search;
     this.canvas = opts.canvas;
+    this.store = opts.store || { get: function () { return null; }, set: function () {} };
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 种子：URL 里是数字就用它，是密语就用密语，其它（含乱敲的字母）一律不认，
-    // 退回随机数字种子。
+    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。URL 里是数字就用，是那个词
+    // 就用那个词，其它（含乱敲的字母）一律不认。
     var raw = seedFromRaw(q.get('seed'));
+    if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
+    else raw = seedFromRaw(this.store.get('seed'));
+    if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.secretFound = (raw === SECRET);
-    this.seed = raw || String(FW.rng.defaultSeed());
+    this.seed = raw;
     this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
@@ -129,8 +138,10 @@
   App.prototype.rebuild = function (scene, seed) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
+      if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
       this.secretFound = (raw === SECRET);
-      this.seed = raw || String(FW.rng.defaultSeed());   // 认不出来就换个数字种子
+      this.seed = raw;
+      this.store.set('seed', raw);
     }
     this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
@@ -214,7 +225,30 @@
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT,
+  /** 点/触摸画布：把屏幕坐标换算成逻辑坐标，在那里炸一发。 */
+  App.prototype.launchAt = function (clientX, clientY) {
+    var r = this.renderer;
+    var rect = this.canvas.getBoundingClientRect();
+    var x = (clientX - rect.left - r.ox) / r.scale;
+    var y = (r.oy - (clientY - rect.top)) / r.scale;
+    return this.show.launchAt(x, y);
+  };
+
+  /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
+  App.prototype.daily = function () { this.rebuild(undefined, FW.rng.dailySeed()); };
+
+  /**
+   * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）
+   * 也照样能用；file:// 打开时给出的仍是本地文件地址。
+   */
+  App.prototype.shareUrl = function () {
+    var q = ['seed=' + encodeURIComponent(this.seed)];
+    if (this.scene !== sceneForSeed(this.seed, undefined)) q.push('scene=' + this.scene);
+    if (this.maxGeos !== FW.show.DEFAULT_GEOS) q.push('max=' + this.maxGeos);
+    return location.href.split('#')[0].split('?')[0] + '?' + q.join('&');
+  };
+
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, SECRET: SECRET,
              sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
-             seedFromRaw: seedFromRaw, SECRET: SECRET };
+             seedFromRaw: seedFromRaw };
 })(globalThis.FW || (globalThis.FW = {}));

@@ -29,6 +29,7 @@
   #panel label {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin: 9px 0; color: rgba(190, 210, 255, .78); font-size: 12px;
+    white-space: nowrap;              /* 别让「种子」被挤成两行 */
   }
   #panel .row { display: flex; gap: 6px; margin: 9px 0; }
   #panel .row button { flex: 1; }
@@ -42,6 +43,7 @@
   input[type=range] { flex: 1; accent-color: #ffd34d; min-width: 0; }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
   button:focus-visible { border-color: rgba(255, 211, 77, .6); }
+  #daily { flex: 0 0 auto; padding: 5px 6px; }
   #seed {
     flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
@@ -98,22 +100,27 @@
 
   <label>种子
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
+    <button id="daily" title="今天这一场（同一天永远是同一个种子）">每日</button>
   </label>
   <div class="row">
     <button id="dice-number" title="随机换一个数字种子">随机种子</button>
+    <button id="replay" title="同一个种子从头再放一遍">重放本场</button>
   </div>
   <p id="scene-help" class="help"></p>
 
   <div class="row">
     <button id="pause">暂停</button>
-    <button id="extra" title="快捷键 R">放一发</button>
+    <button id="extra" title="快捷键 R，或直接点画面在某处炸一发">放一发</button>
   </div>
   <div class="row">
-    <button id="replay" title="同一个 seed 从头再放一遍">重放本场</button>
+    <button id="share" title="复制这一场的链接">复制链接</button>
     <button id="save">存 PNG</button>
   </div>
   <div class="row">
-    <button id="record" title="录成 WebM（录制时自动收起面板；只录画布，不含界面）">录制</button>
+    <button id="record" title="录成 WebM（只录画布，不含界面；元数据里写入种子）">录制</button>
+    <button id="fullscreen" title="全屏（Esc 退出）">全屏</button>
+  </div>
+  <div class="row">
     <button id="hide">收起 UI</button>
   </div>
 
@@ -123,7 +130,8 @@
   </label>
 
   <p class="hint">
-    空格 暂停 · R 放一发 · Esc 收起
+    空格 暂停 · R 放一发 · Esc 收起<br>
+    点画面 = 在那里炸一发
   </p>
 </aside>
 

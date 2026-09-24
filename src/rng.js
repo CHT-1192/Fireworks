@@ -55,6 +55,16 @@
 
   function defaultSeed() { return 1 + Math.floor(Math.random() * 999999); }
 
+  /**
+   * 当天种子：同一天永远是同一个数字，换一天才有新的一场 —— 可复现、可分享，
+   * 而且不需要记住任何东西。
+   */
+  function dailySeed(date) {
+    var d = date || new Date();
+    var key = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    return (hashSeed(key) % 999999) + 1;
+  }
+
   function Random(seed) {
     this.mt = new Uint32Array(N);
     this.mti = N + 1;
@@ -163,6 +173,6 @@
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed,
+  FW.rng = { Random: Random, defaultSeed: defaultSeed, dailySeed: dailySeed,
              isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));

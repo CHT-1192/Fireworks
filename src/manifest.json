@@ -11,7 +11,9 @@
     "show.js",
     "view.js",
     "app.js",
+    "ebml.js",
     "record.js",
+    "actions.js",
     "ui.js"
   ]
 }

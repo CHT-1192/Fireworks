@@ -82,6 +82,18 @@
     return fw;
   };
 
+  /** 在指定的逻辑坐标炸一发（点击/触摸用）：从画面下方升上来，风格与配色随机。 */
+  Show.prototype.launchAt = function (x, y) {
+    if (this.full() || this.elements.length > this.elementCap()) return null;
+    var lim = 20;
+    x = Math.max(-this.w / 2 + lim, Math.min(this.w / 2 - lim, x));
+    y = Math.max(-this.h / 2 + 60, Math.min(this.h / 2 - 30, y));
+    var rng = this.rng;
+    var style = rng.choice(STYLE_NAMES);
+    var launch = [x + rng.uniform(-14, 14), -this.h / 2 - 6];
+    return this.spawn(style, launch, [x, y], data.randomPalette(rng));
+  };
+
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;

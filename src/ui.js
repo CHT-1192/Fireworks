@@ -58,62 +58,6 @@
     this.applyUiVisibility();
   };
 
-  /* ---------------------------------------------------------------- 录制 */
-
-  /** 录 / 停。录制期间收起面板 —— captureStream 只抓 canvas，面板本来就不在画面里，
-   *  收起来只是让你看着干净；停止条是 DOM 浮层，也不会进画面。 */
-  FW.app.App.prototype.toggleRecord = function () {
-    if (this.recorder && this.recorder.recording()) this.stopRecord();
-    else this.startRecord();
-  };
-
-  FW.app.App.prototype.startRecord = function () {
-    if (!FW.record.supported()) {
-      console.warn('这个浏览器没有 MediaRecorder / captureStream，录不了。');
-      return;
-    }
-    if (!this.recorder) {
-      this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
-    }
-    if (!this.recorder.start()) return;
-    var self = this;
-    this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
-    this.recUiWasHidden = this.hideUi;
-    this.hideUi = true;
-    this.applyUiVisibility();
-    $('rec').hidden = false;
-    $('record').textContent = '停止录制';
-    this.recTimer = setInterval(function () {
-      $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
-    }, 100);
-    console.log('开始录制（只录画布，不含界面）');
-  };
-
-  FW.app.App.prototype.stopRecord = function () {
-    if (!this.recorder || !this.recorder.recording()) return;
-    var self = this;
-    clearInterval(this.recTimer);
-    this.recTimer = null;
-    var secs = this.recorder.elapsed();
-    $('rec').hidden = true;
-    $('record').textContent = '录制';
-    this.hideUi = this.recUiWasHidden;      // 恢复录制前的界面状态
-    this.applyUiVisibility();
-    // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
-    this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
-      if (!blob) return;
-      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
-               + secs.toFixed(0) + 's.webm';
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
-      console.log('录了 ' + secs.toFixed(1) + ' 秒 -> ' + name
-        + '（' + Math.round(blob.size / 1024) + ' KB，元数据里写了 seed）');
-    });
-  };
-
   /** 出错了：把信息摆到 HUD 上（canvas 里 rAF 抛的异常默认是看不见的）。 */
   FW.app.App.prototype.onError = function (err) {
     console.error(err);
@@ -183,11 +127,15 @@
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
     $('rec-stop').addEventListener('click', function () { self.stopRecord(); });
-    // 点一下画面 = 我看完了：把焦点从种子框收回，R 之类立刻恢复
-    this.canvas.addEventListener('pointerdown', function () {
+    // 点/触摸画面：在那里炸一发；顺便把焦点从种子框收回（R 之类立刻恢复）
+    this.canvas.addEventListener('pointerdown', function (e) {
       var el = document.activeElement;
       if (el && el.id === 'seed') el.blur();
+      self.launchAt(e.clientX, e.clientY);
     });
+    $('daily').addEventListener('click', function () { self.daily(); });
+    $('share').addEventListener('click', function () { self.copyLink(this); });
+    $('fullscreen').addEventListener('click', function () { self.toggleFullscreen(this); });
     $('show').addEventListener('click', function () { self.toggleUi(); });
     $('budget').addEventListener('input', function () {
       self.maxGeos = parseInt(this.value, 10);
@@ -218,14 +166,6 @@
     });
   };
 
-  FW.app.App.prototype.savePng = function () {
-    var a = document.createElement('a');
-    a.download = 'fireworks_' + this.scene + '_seed' + this.seed
-               + '_t' + this.show.time.toFixed(2) + '.png';
-    a.href = this.renderer.toDataURL();
-    a.click();
-  };
-
   /* --------------------------------------------------------------- 启动 */
 
   /**
@@ -243,10 +183,19 @@
       'color:#ffd34d', 'color:inherit');
   }
 
+  /** localStorage 里记一下上次的种子（隐私模式下可能直接抛错，所以都包起来）。 */
+  function store() {
+    return {
+      get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
+      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } }
+    };
+  }
+
   function boot() {
     var inst = new FW.app.App({
       canvas: $('stage'),
-      search: new URLSearchParams(location.search)
+      search: new URLSearchParams(location.search),
+      store: store()
     });
     FW.app.instance = inst;
     inst.start();

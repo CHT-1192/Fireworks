@@ -15,6 +15,8 @@
  *      ④ 快捷键：滑块聚焦时 R 要能放，种子框打字时 R 不放，回车收焦点，Esc 随时有效。
  *   C) 录制：真按「录制」-> 面板收起 -> 停止 -> 下载的 WebM 能被 ffprobe 读到
  *      SEED 元数据、能被浏览器解码、文件名带种子（没有 ffprobe 就跳过元数据那一步）。
+ *   D) 交互：点画面在该处炸（坐标换算对不对）、每日按钮跳到当天种子、复制链接把
+ *      可用链接写进剪贴板、全屏按钮真的进全屏。
  *
  * 缺 playwright-core 或浏览器时：A 跳过、B 的列表比对仍然要跑。
  * 用法：node tools/browser_check.js      （npm i 一次；CHROME= 可指定浏览器）
@@ -333,6 +335,77 @@ async function checkRecord(browser) {
   return bad;
 }
 
+/* ---------------------------------------------------------------- D) 交互 */
+
+async function checkInteract(browser) {
+  console.log('\nD) 交互：点画面发射 / 每日 / 复制链接 / 全屏');
+  if (!browser) {
+    console.log('  跳过：没有浏览器');
+    return 0;
+  }
+  let bad = 0;
+  const problems = [];
+  const steps = [];
+  const { page } = await pw.openPage(browser, BASE + '/?seed=7&max=900',
+                                     { viewport: { width: 1280, height: 800 } });
+  try { await page.context().grantPermissions(['clipboard-read', 'clipboard-write']); }
+  catch (e) { /* 头less 下给不了就算了，后面会退回检查提示 */ }
+
+  // 暂停 + 只数 launchAt 的调用，免得自动发射干扰判断
+  await page.evaluate(() => {
+    const app = window.FW.app.instance;
+    app.paused = true;
+    window.__launched = 0;
+    const orig = app.show.launchAt.bind(app.show);
+    app.show.launchAt = function (x, y) { window.__launched++; return orig(x, y); };
+  });
+
+  // D1) 点画面：应该在**点的那个位置**炸（视口 1280×800，逻辑中心即画面中心）
+  await page.mouse.click(600, 300);
+  const launched = await page.evaluate(() => window.__launched);
+  const hit = await page.evaluate(() => {
+    const f = FW.app.instance.show.fireworks.slice(-1)[0];
+    return f ? { x: Math.round(f.x1), y: Math.round(f.y1) } : null;
+  });
+  if (launched !== 1) problems.push(`点画面没有发射（launchAt 调用 ${launched} 次）`);
+  if (!hit || Math.abs(hit.x - (-40)) > 2 || Math.abs(hit.y - 100) > 2) {
+    problems.push(`落点不对：期望 (-40, 100)，实际 ${JSON.stringify(hit)}`);
+  }
+  steps.push(`点 (600,300) -> 落点 ${hit ? hit.x + ',' + hit.y : '无'}`);
+
+  // D2) 每日按钮 = 当天种子
+  await page.click('#daily');
+  const daily = await page.evaluate(() => ({ got: FW.app.instance.seed,
+                                             want: String(FW.rng.dailySeed()) }));
+  if (daily.got !== daily.want) problems.push(`每日没跳到当天种子：${daily.got} != ${daily.want}`);
+  steps.push(`每日 -> seed ${daily.got}`);
+
+  // D3) 复制链接：剪贴板里要有能复现这一场的地址
+  await page.click('#share');
+  await page.waitForTimeout(200);
+  const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+  const urlOk = clip.indexOf('seed=' + daily.got) >= 0 && clip.indexOf('?') > 0;
+  if (!urlOk) problems.push('剪贴板里的链接不对：' + clip);
+  steps.push(`链接 ${clip.slice(0, 72)}`);
+
+  // D4) 全屏
+  await page.click('#fullscreen');
+  await page.waitForTimeout(400);
+  const inFs = await page.evaluate(() => !!document.fullscreenElement);
+  if (!inFs) problems.push('点全屏没有进全屏');
+  steps.push(`全屏 ${inFs}`);
+  if (inFs) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
+
+  await page.close();
+  bad += problems.length;
+  line(problems.length === 0, '点/每日/分享/全屏', steps.join('；')
+    + (problems.length ? '\n        ' + problems.join('\n        ') : ''));
+  return bad;
+}
+
 async function main() {
   const why = pw.whyUnavailable();
   if (why) console.log('（' + why + '）');
@@ -344,6 +417,7 @@ async function main() {
     bad += await checkDist(browser);
     bad += await checkDev(browser);
     bad += await checkRecord(browser);
+    bad += await checkInteract(browser);
   } finally {
     if (browser) await browser.close();
   }

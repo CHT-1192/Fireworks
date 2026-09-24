@@ -1,7 +1,7 @@
 <!--
   烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
-  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> record.js -> ui.js
+  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> ebml.js -> record.js -> actions.js -> ui.js
 -->
 <!doctype html>
 <html lang="zh-CN">
@@ -34,6 +34,7 @@
   #panel label {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin: 9px 0; color: rgba(190, 210, 255, .78); font-size: 12px;
+    white-space: nowrap;              /* 别让「种子」被挤成两行 */
   }
   #panel .row { display: flex; gap: 6px; margin: 9px 0; }
   #panel .row button { flex: 1; }
@@ -47,6 +48,7 @@
   input[type=range] { flex: 1; accent-color: #ffd34d; min-width: 0; }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
   button:focus-visible { border-color: rgba(255, 211, 77, .6); }
+  #daily { flex: 0 0 auto; padding: 5px 6px; }
   #seed {
     flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
@@ -103,22 +105,27 @@
 
   <label>种子
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
+    <button id="daily" title="今天这一场（同一天永远是同一个种子）">每日</button>
   </label>
   <div class="row">
     <button id="dice-number" title="随机换一个数字种子">随机种子</button>
+    <button id="replay" title="同一个种子从头再放一遍">重放本场</button>
   </div>
   <p id="scene-help" class="help"></p>
 
   <div class="row">
     <button id="pause">暂停</button>
-    <button id="extra" title="快捷键 R">放一发</button>
+    <button id="extra" title="快捷键 R，或直接点画面在某处炸一发">放一发</button>
   </div>
   <div class="row">
-    <button id="replay" title="同一个 seed 从头再放一遍">重放本场</button>
+    <button id="share" title="复制这一场的链接">复制链接</button>
     <button id="save">存 PNG</button>
   </div>
   <div class="row">
-    <button id="record" title="录成 WebM（录制时自动收起面板；只录画布，不含界面）">录制</button>
+    <button id="record" title="录成 WebM（只录画布，不含界面；元数据里写入种子）">录制</button>
+    <button id="fullscreen" title="全屏（Esc 退出）">全屏</button>
+  </div>
+  <div class="row">
     <button id="hide">收起 UI</button>
   </div>
 
@@ -128,7 +135,8 @@
   </label>
 
   <p class="hint">
-    空格 暂停 · R 放一发 · Esc 收起
+    空格 暂停 · R 放一发 · Esc 收起<br>
+    点画面 = 在那里炸一发
   </p>
 </aside>
 
@@ -329,6 +337,16 @@ setTimeout(function () {
 
   function defaultSeed() { return 1 + Math.floor(Math.random() * 999999); }
 
+  /**
+   * 当天种子：同一天永远是同一个数字，换一天才有新的一场 —— 可复现、可分享，
+   * 而且不需要记住任何东西。
+   */
+  function dailySeed(date) {
+    var d = date || new Date();
+    var key = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+    return (hashSeed(key) % 999999) + 1;
+  }
+
   function Random(seed) {
     this.mt = new Uint32Array(N);
     this.mti = N + 1;
@@ -437,7 +455,7 @@ setTimeout(function () {
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed,
+  FW.rng = { Random: Random, defaultSeed: defaultSeed, dailySeed: dailySeed,
              isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));
 
@@ -1074,6 +1092,18 @@ setTimeout(function () {
     return fw;
   };
 
+  /** 在指定的逻辑坐标炸一发（点击/触摸用）：从画面下方升上来，风格与配色随机。 */
+  Show.prototype.launchAt = function (x, y) {
+    if (this.full() || this.elements.length > this.elementCap()) return null;
+    var lim = 20;
+    x = Math.max(-this.w / 2 + lim, Math.min(this.w / 2 - lim, x));
+    y = Math.max(-this.h / 2 + 60, Math.min(this.h / 2 - 30, y));
+    var rng = this.rng;
+    var style = rng.choice(STYLE_NAMES);
+    var launch = [x + rng.uniform(-14, 14), -this.h / 2 - 6];
+    return this.spawn(style, launch, [x, y], data.randomPalette(rng));
+  };
+
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;
@@ -1330,17 +1360,26 @@ setTimeout(function () {
     return seed === SECRET ? 'classic' : 'random';
   }
 
-  /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
+  /**
+   * opts = { canvas, search, store }
+   *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
+   *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
+   * 构造完不会自己开跑，需 start()。
+   */
   function App(opts) {
     var q = opts.search;
     this.canvas = opts.canvas;
+    this.store = opts.store || { get: function () { return null; }, set: function () {} };
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 种子：URL 里是数字就用它，是密语就用密语，其它（含乱敲的字母）一律不认，
-    // 退回随机数字种子。
+    // 种子的来源顺序：URL -> 上次用过的 -> 今天这一场。URL 里是数字就用，是那个词
+    // 就用那个词，其它（含乱敲的字母）一律不认。
     var raw = seedFromRaw(q.get('seed'));
+    if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
+    else raw = seedFromRaw(this.store.get('seed'));
+    if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.secretFound = (raw === SECRET);
-    this.seed = raw || String(FW.rng.defaultSeed());
+    this.seed = raw;
     this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
@@ -1409,8 +1448,10 @@ setTimeout(function () {
   App.prototype.rebuild = function (scene, seed) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
+      if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
       this.secretFound = (raw === SECRET);
-      this.seed = raw || String(FW.rng.defaultSeed());   // 认不出来就换个数字种子
+      this.seed = raw;
+      this.store.set('seed', raw);
     }
     this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
@@ -1494,44 +1535,53 @@ setTimeout(function () {
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT,
+  /** 点/触摸画布：把屏幕坐标换算成逻辑坐标，在那里炸一发。 */
+  App.prototype.launchAt = function (clientX, clientY) {
+    var r = this.renderer;
+    var rect = this.canvas.getBoundingClientRect();
+    var x = (clientX - rect.left - r.ox) / r.scale;
+    var y = (r.oy - (clientY - rect.top)) / r.scale;
+    return this.show.launchAt(x, y);
+  };
+
+  /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
+  App.prototype.daily = function () { this.rebuild(undefined, FW.rng.dailySeed()); };
+
+  /**
+   * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）
+   * 也照样能用；file:// 打开时给出的仍是本地文件地址。
+   */
+  App.prototype.shareUrl = function () {
+    var q = ['seed=' + encodeURIComponent(this.seed)];
+    if (this.scene !== sceneForSeed(this.seed, undefined)) q.push('scene=' + this.scene);
+    if (this.maxGeos !== FW.show.DEFAULT_GEOS) q.push('max=' + this.maxGeos);
+    return location.href.split('#')[0].split('?')[0] + '?' + q.join('&');
+  };
+
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, SECRET: SECRET,
              sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
-             seedFromRaw: seedFromRaw, SECRET: SECRET };
+             seedFromRaw: seedFromRaw };
 })(globalThis.FW || (globalThis.FW = {}));
 
-/* ===================== src/record.js ===================== */
+/* ===================== src/ebml.js ===================== */
 /* ============================================================================
- * record.js —— 把画布录成 WebM（含把种子写进元数据）
+ * ebml.js —— WebM(EBML) 容器手术：把标签写进元数据
  * ---------------------------------------------------------------------------
- * 编码完全交给浏览器：canvas.captureStream() + MediaRecorder（VP9→VP8 兜底），
- * 所以不需要任何依赖或素材。
+ * MediaRecorder 没有写 tag 的接口，只能自己动手。两个 ffprobe 实测出来的要点：
  *
- * **面板不会被录进去**：captureStream 只抓 canvas 自己画的内容，面板/HUD 是浮在
- * 上面的 DOM，天然不在画面里。录制期间隐藏 UI 只是让你看着干净。
+ *   * ffmpeg / 播放器只在**第一个 Cluster 之前**找 Tags —— 尾接在文件末尾的标签
+ *     它们根本不会读；
+ *   * Chromium 的 muxer 在头部留了一个约 45 字节的 Void 填充块。**直接覆盖它**，
+ *     标签就落在前部，而且零偏移（SeekHead / Cues 一个字节都不用改，实测文件长度
+ *     完全不变）。
+ *   * 放不下就少写几个标签（调用方把种子放在第一个）；连 Void 都没有才退化成
+ *     尾接 + 回填 Segment 长度（仍是合法 WebM，只是只在头部找标签的工具看不到）。
  *
- * 元数据：MediaRecorder 没有写 tag 的接口，所以这里自己往 EBML 里追加一个 Tags
- * 元素，并把 Segment 的长度回填 —— 不回填的话播放器按声明长度读到 Clusters 就停，
- * 标签等于白写（ffprobe 实测过）。写完的文件仍是标准 WebM（ffprobe/播放器都认）。
+ * 纯函数、不依赖 DOM / MediaRecorder，所以可以在 Node 里直接测（写进去的字节可以
+ * 拿 ffprobe 验证）。
  * ==========================================================================*/
 ;(function (FW) {
   'use strict';
-
-  var MIMES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
-
-  /** 有没有录制能力（老浏览器可能没有 MediaRecorder / captureStream）。 */
-  function supported() {
-    return typeof MediaRecorder !== 'undefined'
-        && typeof HTMLCanvasElement !== 'undefined'
-        && typeof HTMLCanvasElement.prototype.captureStream === 'function';
-  }
-
-  function pickMime() {
-    if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
-    for (var i = 0; i < MIMES.length; i++) {
-      if (MediaRecorder.isTypeSupported(MIMES[i])) return MIMES[i];
-    }
-    return '';
-  }
 
   /* ------------------------------------------------------------ EBML 小工具 */
 
@@ -1693,6 +1743,41 @@ setTimeout(function () {
     return out;
   }
 
+  FW.ebml = { writeTags: writeTags, tagBytes: tagBytes, vintSize: vintSize, elemAt: elemAt };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/record.js ===================== */
+/* ============================================================================
+ * record.js —— 把画布录成 WebM（含把种子写进元数据）
+ * ---------------------------------------------------------------------------
+ * 编码完全交给浏览器：canvas.captureStream() + MediaRecorder（VP9→VP8 兜底），
+ * 所以不需要任何依赖或素材。
+ *
+ * **面板不会被录进去**：captureStream 只抓 canvas 自己画的内容，面板/HUD 是浮在
+ * 上面的 DOM，天然不在画面里。录制期间隐藏 UI 只是让你看着干净。
+ *
+ * 元数据：WebM 容器手术在 src/ebml.js（覆盖头部 Void 填充块，零偏移）。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  var MIMES = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+
+  /** 有没有录制能力（老浏览器可能没有 MediaRecorder / captureStream）。 */
+  function supported() {
+    return typeof MediaRecorder !== 'undefined'
+        && typeof HTMLCanvasElement !== 'undefined'
+        && typeof HTMLCanvasElement.prototype.captureStream === 'function';
+  }
+
+  function pickMime() {
+    if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return '';
+    for (var i = 0; i < MIMES.length; i++) {
+      if (MediaRecorder.isTypeSupported(MIMES[i])) return MIMES[i];
+    }
+    return '';
+  }
+
   /* ------------------------------------------------------------- Recorder */
 
   /**
@@ -1754,7 +1839,7 @@ setTimeout(function () {
         var blob = new Blob(self.chunks, { type: mime });
         self.chunks = [];
         blob.arrayBuffer().then(function (buf) {
-          var out = writeTags(new Uint8Array(buf), tags);
+          var out = FW.ebml.writeTags(new Uint8Array(buf), tags);
           resolve(new Blob([out], { type: mime }));
         });
       };
@@ -1762,8 +1847,132 @@ setTimeout(function () {
     });
   };
 
-  FW.record = { supported: supported, Recorder: Recorder, writeTags: writeTags,
-                tagBytes: tagBytes, pickMime: pickMime };
+  FW.record = { supported: supported, Recorder: Recorder, pickMime: pickMime };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/actions.js ===================== */
+/* ============================================================================
+ * actions.js —— 面板上那些"动作"：存图 / 分享链接 / 全屏 / 录制
+ * ---------------------------------------------------------------------------
+ * 与 ui.js 的分工：ui.js 管"界面本身"（HUD、面板同步、键盘、种子框守卫、启动），
+ * 这里管"按一下之后做的事"。都挂在 FW.app.App 上，由 ui.js 的 bindPanel 调用。
+ *
+ * 录制的机制在 src/record.js（captureStream + MediaRecorder），容器手术在
+ * src/ebml.js；这里只负责按钮、计时条、收起面板与下载。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ------------------------------------------------------- 分享 / 全屏 */
+
+  /** 复制这一场的链接；成功与否都直接写在按钮上（两秒后恢复）。 */
+  FW.app.App.prototype.copyLink = function (btn) {
+    var url = this.shareUrl();
+    var self = this;
+    function done(ok) {
+      var old = btn.textContent;
+      btn.textContent = ok ? '已复制' : '复制失败';
+      setTimeout(function () { btn.textContent = old; }, 1500);
+      if (ok) console.log('这一场的链接：' + url);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { done(true); },
+                                             function () { done(fallback(url)); });
+    } else {
+      done(fallback(url));
+    }
+    // 剪贴板 API 要安全上下文；不行就退回老办法
+    function fallback(text) {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) { return false; }
+    }
+    void self;
+  };
+
+  FW.app.App.prototype.toggleFullscreen = function (btn) {
+    var el = document.documentElement;
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) req.call(el);
+    }
+    void btn;
+  };
+
+  /* ---------------------------------------------------------------- 录制 */
+
+  /** 录 / 停。录制期间收起面板 —— captureStream 只抓 canvas，面板本来就不在画面里，
+   *  收起来只是让你看着干净；停止条是 DOM 浮层，也不会进画面。 */
+  FW.app.App.prototype.toggleRecord = function () {
+    if (this.recorder && this.recorder.recording()) this.stopRecord();
+    else this.startRecord();
+  };
+
+  FW.app.App.prototype.startRecord = function () {
+    if (!FW.record.supported()) {
+      console.warn('这个浏览器没有 MediaRecorder / captureStream，录不了。');
+      return;
+    }
+    if (!this.recorder) {
+      this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
+    }
+    if (!this.recorder.start()) return;
+    var self = this;
+    this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
+    this.recUiWasHidden = this.hideUi;
+    this.hideUi = true;
+    this.applyUiVisibility();
+    $('rec').hidden = false;
+    $('record').textContent = '停止录制';
+    this.recTimer = setInterval(function () {
+      $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
+    }, 100);
+    console.log('开始录制（只录画布，不含界面）');
+  };
+
+  FW.app.App.prototype.stopRecord = function () {
+    if (!this.recorder || !this.recorder.recording()) return;
+    var self = this;
+    clearInterval(this.recTimer);
+    this.recTimer = null;
+    var secs = this.recorder.elapsed();
+    $('rec').hidden = true;
+    $('record').textContent = '录制';
+    this.hideUi = this.recUiWasHidden;      // 恢复录制前的界面状态
+    this.applyUiVisibility();
+    // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
+    this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
+      if (!blob) return;
+      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
+               + secs.toFixed(0) + 's.webm';
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+      console.log('录了 ' + secs.toFixed(1) + ' 秒 -> ' + name
+        + '（' + Math.round(blob.size / 1024) + ' KB，元数据里写了 seed）');
+    });
+  };
+
+  FW.app.App.prototype.savePng = function () {
+    var a = document.createElement('a');
+    a.download = 'fireworks_' + this.scene + '_seed' + this.seed
+               + '_t' + this.show.time.toFixed(2) + '.png';
+    a.href = this.renderer.toDataURL();
+    a.click();
+  };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/ui.js ===================== */
@@ -1825,62 +2034,6 @@ setTimeout(function () {
   FW.app.App.prototype.toggleUi = function () {
     this.uiHidden = !this.uiHidden;
     this.applyUiVisibility();
-  };
-
-  /* ---------------------------------------------------------------- 录制 */
-
-  /** 录 / 停。录制期间收起面板 —— captureStream 只抓 canvas，面板本来就不在画面里，
-   *  收起来只是让你看着干净；停止条是 DOM 浮层，也不会进画面。 */
-  FW.app.App.prototype.toggleRecord = function () {
-    if (this.recorder && this.recorder.recording()) this.stopRecord();
-    else this.startRecord();
-  };
-
-  FW.app.App.prototype.startRecord = function () {
-    if (!FW.record.supported()) {
-      console.warn('这个浏览器没有 MediaRecorder / captureStream，录不了。');
-      return;
-    }
-    if (!this.recorder) {
-      this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
-    }
-    if (!this.recorder.start()) return;
-    var self = this;
-    this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
-    this.recUiWasHidden = this.hideUi;
-    this.hideUi = true;
-    this.applyUiVisibility();
-    $('rec').hidden = false;
-    $('record').textContent = '停止录制';
-    this.recTimer = setInterval(function () {
-      $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
-    }, 100);
-    console.log('开始录制（只录画布，不含界面）');
-  };
-
-  FW.app.App.prototype.stopRecord = function () {
-    if (!this.recorder || !this.recorder.recording()) return;
-    var self = this;
-    clearInterval(this.recTimer);
-    this.recTimer = null;
-    var secs = this.recorder.elapsed();
-    $('rec').hidden = true;
-    $('record').textContent = '录制';
-    this.hideUi = this.recUiWasHidden;      // 恢复录制前的界面状态
-    this.applyUiVisibility();
-    // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
-    this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
-      if (!blob) return;
-      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
-               + secs.toFixed(0) + 's.webm';
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
-      console.log('录了 ' + secs.toFixed(1) + ' 秒 -> ' + name
-        + '（' + Math.round(blob.size / 1024) + ' KB，元数据里写了 seed）');
-    });
   };
 
   /** 出错了：把信息摆到 HUD 上（canvas 里 rAF 抛的异常默认是看不见的）。 */
@@ -1952,11 +2105,15 @@ setTimeout(function () {
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
     $('rec-stop').addEventListener('click', function () { self.stopRecord(); });
-    // 点一下画面 = 我看完了：把焦点从种子框收回，R 之类立刻恢复
-    this.canvas.addEventListener('pointerdown', function () {
+    // 点/触摸画面：在那里炸一发；顺便把焦点从种子框收回（R 之类立刻恢复）
+    this.canvas.addEventListener('pointerdown', function (e) {
       var el = document.activeElement;
       if (el && el.id === 'seed') el.blur();
+      self.launchAt(e.clientX, e.clientY);
     });
+    $('daily').addEventListener('click', function () { self.daily(); });
+    $('share').addEventListener('click', function () { self.copyLink(this); });
+    $('fullscreen').addEventListener('click', function () { self.toggleFullscreen(this); });
     $('show').addEventListener('click', function () { self.toggleUi(); });
     $('budget').addEventListener('input', function () {
       self.maxGeos = parseInt(this.value, 10);
@@ -1987,14 +2144,6 @@ setTimeout(function () {
     });
   };
 
-  FW.app.App.prototype.savePng = function () {
-    var a = document.createElement('a');
-    a.download = 'fireworks_' + this.scene + '_seed' + this.seed
-               + '_t' + this.show.time.toFixed(2) + '.png';
-    a.href = this.renderer.toDataURL();
-    a.click();
-  };
-
   /* --------------------------------------------------------------- 启动 */
 
   /**
@@ -2012,10 +2161,19 @@ setTimeout(function () {
       'color:#ffd34d', 'color:inherit');
   }
 
+  /** localStorage 里记一下上次的种子（隐私模式下可能直接抛错，所以都包起来）。 */
+  function store() {
+    return {
+      get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
+      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } }
+    };
+  }
+
   function boot() {
     var inst = new FW.app.App({
       canvas: $('stage'),
-      search: new URLSearchParams(location.search)
+      search: new URLSearchParams(location.search),
+      store: store()
     });
     FW.app.instance = inst;
     inst.start();
