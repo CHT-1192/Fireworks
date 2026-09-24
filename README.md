@@ -9,7 +9,7 @@
 
 | 方式 | 怎么做 |
 | --- | --- |
-| **在线版** | 在仓库 Settings → Pages 选 **main 分支 / `/docs` 目录**，链接就是 `https://<用户名>.github.io/<仓库名>/`（`docs/index.html` 每次构建都会重写，不会过期） |
+| **在线版** | <https://cht-1192.github.io/Fireworks/>（Pages 用 main 分支的 `/docs` 目录；`docs/index.html` 每次构建都会重写，不会过期） |
 | **离线单文件** | 下载 [dist/turtle_fireworks.html](dist/turtle_fireworks.html)，双击打开。94 KB，零外部请求 |
 | **自己跑开发版** | `npm start` → <http://127.0.0.1:9240/>（不需要 `npm install`） |
 
