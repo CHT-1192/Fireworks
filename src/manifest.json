@@ -1,0 +1,15 @@
+{
+  "entry": "app.js",
+  "maxLines": 300,
+  "files": [
+    "core.js",
+    "rng.js",
+    "data.js",
+    "elements.js",
+    "trails.js",
+    "firework.js",
+    "show.js",
+    "view.js",
+    "app.js"
+  ]
+}

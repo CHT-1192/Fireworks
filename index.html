@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>烟花 · Canvas 复刻版</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #000020; color: #d7e5ff;
+    font: 13px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  [hidden] { display: none !important; }
+
+  /* ---------------------------------------------------------- 控制台 */
+  #panel {
+    position: fixed; top: 12px; left: 12px; z-index: 3; width: 272px;
+    padding: 14px; border-radius: 14px;
+    background: rgba(6, 10, 30, .74); backdrop-filter: blur(10px);
+    border: 1px solid rgba(120, 160, 255, .18);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  }
+  #panel h1 { margin: 0 0 12px; font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+  #panel h1 span {
+    font-size: 11px; font-weight: 400; letter-spacing: 0; margin-left: 4px;
+    color: rgba(170, 195, 255, .55);
+  }
+  #panel label {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin: 9px 0; color: rgba(190, 210, 255, .78); font-size: 12px;
+  }
+  #panel .row { display: flex; gap: 6px; margin: 9px 0; }
+  #panel .row button { flex: 1; }
+  select, input[type=number], button {
+    font: inherit; font-size: 12px; color: #e6efff; padding: 5px 8px;
+    background: rgba(255, 255, 255, .06); border: 1px solid rgba(140, 170, 255, .26);
+    border-radius: 8px; outline: none;
+  }
+  select, input[type=number] { width: 96px; }
+  input[type=number] { text-align: right; font-variant-numeric: tabular-nums; }
+  button { cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
+  button:hover { background: rgba(140, 170, 255, .2); border-color: rgba(160, 190, 255, .5); }
+  button:active { transform: translateY(1px); }
+  input[type=range] { flex: 1; accent-color: #ffd34d; min-width: 0; }
+  input[type=checkbox] { width: 15px; height: 15px; accent-color: #ffd34d; cursor: pointer; }
+  #budget-val { width: 30px; text-align: right; font-variant-numeric: tabular-nums; color: #ffd98a; }
+  #panel .help { margin: -4px 0 10px; font-size: 11px; line-height: 1.6; color: rgba(170, 195, 255, .5); }
+  #panel .hint {
+    margin: 12px 0 0; padding-top: 10px; font-size: 11px; line-height: 1.7;
+    color: rgba(170, 195, 255, .48); border-top: 1px solid rgba(120, 160, 255, .12);
+    overflow-wrap: anywhere;
+  }
+  #panel code { color: rgba(255, 217, 138, .75); font-size: 10.5px; word-break: break-all; }
+  #show { position: fixed; top: 12px; left: 12px; z-index: 3; }
+
+  /* --------------------------------------------------------------- HUD */
+  #hud {
+    position: fixed; top: 12px; right: 12px; z-index: 2; padding: 10px 12px;
+    border-radius: 12px; text-align: right; font-size: 12px; line-height: 1.75;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: rgba(6, 10, 30, .58); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120, 160, 255, .14);
+    font-variant-numeric: tabular-nums;
+  }
+  #hud .k { color: rgba(170, 195, 255, .5); margin-right: 6px; }
+  #hud b { font-weight: 600; color: #ffd98a; }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<aside id="panel">
+  <h1>烟花<span>Canvas 复刻版</span></h1>
+
+  <label>场景
+    <select id="scene">
+      <option value="classic">参考图风格</option>
+      <option value="original">原版复刻</option>
+      <option value="random">纯随机</option>
+    </select>
+  </label>
+  <p id="scene-help" class="help"></p>
+
+  <label>种子
+    <span>
+      <input id="seed" type="number" min="0" max="999999" step="1">
+      <button id="dice" title="随机换一个种子">随机</button>
+    </span>
+  </label>
+
+  <div class="row">
+    <button id="pause">暂停</button>
+    <button id="extra" title="快捷键 R">放一发</button>
+  </div>
+  <div class="row">
+    <button id="still" title="按截图实测坐标定格参考图那一帧">复刻单帧</button>
+    <button id="replay" title="同一个 seed 从头再放一遍">重放本场</button>
+  </div>
+  <div class="row">
+    <button id="save">存 PNG</button>
+    <button id="hide">收起 UI</button>
+  </div>
+
+  <label>光滑尾迹
+    <input id="dense" type="checkbox" checked>
+  </label>
+
+  <label>图元上限
+    <input id="budget" type="range" min="30" max="300" step="10">
+    <b id="budget-val">130</b>
+  </label>
+
+  <p class="hint">
+    空格 暂停 / 继续 · R 放一发 · Esc 收起面板<br>
+    URL 参数：<code>?scene=original&amp;still=1</code>（= 参考图那一帧）、
+    <code>?frames=90</code>（定格第 90 帧）、<code>?ui=0</code>（无 UI 截图）、
+    <code>?seed=7&amp;max=200</code><br>
+    同一个 seed 就是同一场烟花，与 Python 原版逐位一致。<br>
+    「光滑尾迹」只用 canvas 的圆头描边画得更细，不影响任何一颗火星；关掉（<code>?exact=1</code>）即回到原版 2~6 段折线的口径。
+  </p>
+</aside>
+
+<button id="show" hidden>≡ 控制台</button>
+
+<div id="hud">
+  <div><span class="k">seed</span><b id="hud-seed">–</b></div>
+  <div><span class="k">场景</span><b id="hud-scene">–</b></div>
+  <div><span class="k">fps</span><b id="hud-fps">–</b></div>
+  <div><span class="k">预算</span><b id="hud-budget">–</b></div>
+  <div><span class="k">图元</span><b id="hud-geos">–</b></div>
+  <div><span class="k">线段</span><b id="hud-segs">–</b></div>
+  <div><span class="k">元素</span><b id="hud-els">–</b></div>
+  <div><span class="k">在飞</span><b id="hud-fw">–</b></div>
+  <div><span class="k">画布</span><b id="hud-wh">–</b></div>
+  <div><span class="k">时刻</span><b id="hud-time">–</b></div>
+  <div><span class="k">状态</span><b id="hud-state">–</b></div>
+</div>
+
+<noscript>这个页面需要 JavaScript。</noscript>
+
+<!--SCRIPTS-->
+</body>
+</html>
