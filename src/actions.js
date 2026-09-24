@@ -101,8 +101,7 @@
     // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
     this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
       if (!blob) return;
-      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
-               + secs.toFixed(0) + 's.webm';
+      var name = 'fireworks_seed' + self.seed + '_' + secs.toFixed(0) + 's.webm';
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -114,14 +113,14 @@
   };
 
   /**
-   * 存 PNG。canvas 自己导出的 PNG 是"裸"的，所以这里把**种子、场景、这一场的链接**
-   * 写进它的元数据（iTXt 块，UTF-8；见 src/pngmeta.js）。文件名本来也带场景与种子。
+   * 存 PNG。canvas 自己导出的 PNG 是"裸"的，所以这里把**种子与这一场的链接**
+   * 写进它的元数据（iTXt 块，UTF-8；见 src/pngmeta.js）。文件名也带种子。
    */
   FW.app.App.prototype.savePng = function () {
-    var name = 'fireworks_' + this.scene + '_seed' + this.seed
+    var name = 'fireworks_seed' + this.seed
              + '_t' + this.show.time.toFixed(2) + '.png';
     var tags = FW.pngmeta.tags({
-      seed: this.seed, scene: this.scene, url: this.shareUrl(), time: new Date()
+      seed: this.seed, url: this.shareUrl(), time: new Date()
     });
     function save(blob) {
       var a = document.createElement('a');

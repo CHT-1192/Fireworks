@@ -135,7 +135,7 @@
     <button id="dice-number" class="mini" title="随机换一个数字种子">随机</button>
     <button id="daily" class="mini" title="今天这一场（同一天永远是同一个种子）">每日</button>
   </div>
-  <p id="scene-help" class="help"></p>
+  <p class="help">配色、花型、位置全随机</p>
 
   <div class="row primary">
     <button id="pause">暂停</button>
@@ -167,7 +167,6 @@
 <div id="hud">
   <div class="line">
     <span class="k">seed</span><b id="hud-seed">–</b>
-    <span class="k">场景</span><b id="hud-scene">–</b>
     <span class="k">时刻</span><b id="hud-time">–</b>
     <b id="hud-state">–</b>
   </div>
@@ -1033,7 +1032,7 @@ setTimeout(function () {
 /* ===================== src/show.js ===================== */
 /* ============================================================================
  * show.js —— 整场秀：管所有元素，按固定顺序推进一帧
- * 对应 turtle_fireworks.py 的 Show 一节（classic 场景布局）。
+ * 对应 turtle_fireworks.py 的 Show 一节（参考图那两发的布局也在下面）。
  * ---------------------------------------------------------------------------
  * 每帧的固定顺序（与原版一致）：
  *   1) 物理更新（可能产生新元素）
@@ -1146,15 +1145,19 @@ setTimeout(function () {
     }
   };
 
-  /* -------------------------------------------------------------- 场景 */
+  /* -------------------------------------------------------------- 插播 */
 
-  /** 参考图风格的开场：左边红辐条 + 黄点，右边绿云团（几何是随机生成的）。 */
-  Show.prototype.classicOpening = function () {
+  /**
+   * 插播：参考图风格的左右两发（左边红辐条 + 黄点，右边绿云团，几何仍是随机生成的）。
+   * 它不是一种"场"——只往正在放的这场里塞两发，开播时（那个词当种子）或中途敲对了
+   * 那个词时各调用一次。所以整场秀只有一种，这里是一个可随时插入的片段。
+   */
+  Show.prototype.interlude = function () {
     this.spawn('spoke', [-152, -this.h / 2 - 6], [-204, 56], HALLOWEEN,
                { count: 14, radius: [138, 220] });
     this.spawn('cloud', [98, -this.h / 2 - 6], [226, 10], MATRIX,
                { count: 38, radius: [120, 310] });
-    this.nextSpawn = 3.2;
+    this.nextSpawn = this.time + 3.2;   // 开播时插播 = 3.2s 后恢复常规节奏；中途插播同理
   };
 
   /* -------------------------------------------------------------- 每帧 */
@@ -1200,10 +1203,9 @@ setTimeout(function () {
     }
   };
 
-  /** 开场：classic=参考图风格（左右两发的配色/花型）；random=纯随机。 */
-  function build(show, scene) {
-    if (scene === 'classic') show.classicOpening();
-    else show.spawnRandom(2);
+  /** 开场：两发随机（整场秀只有这一种；参考图那两发走 interlude()，见上）。 */
+  function build(show) {
+    show.spawnRandom(2);
   }
 
   FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS };
@@ -1349,14 +1351,10 @@ setTimeout(function () {
   var MAX_STEPS = 4;                     // 单帧最多追几步
   var DT_CLAMP = 0.06;                   // 单帧最多推进 60ms（同原版）
 
-  var SCENES = {
-    classic: ['参考图风格', '左右两发照参考图的配色与花型'],
-    random: ['纯随机', '配色、花型、位置全随机']
-  };
-
   /**
-   * 种子框只认这一个词。正常只收数字，字母必须一个字符一个字符敲对才留得下来
-   * （敲错的当场被弹回去），所以"一个一个字母试"本身就有反馈。
+   * 种子框只认这一个词。整场秀只有一种（纯随机），这个词换来的不是另一种"场"，
+   * 而是一次**插播**：两发参考图风格的烟花。正常只收数字，字母必须一个字符一个
+   * 字符敲对才留得下来（敲错的当场被弹回去），所以"一个一个字母试"本身就有反馈。
    * 换词就改这一行 —— 提示语里的字母个数会自动跟着变。
    */
   var SECRET = 'FIREWORKS';
@@ -1372,15 +1370,6 @@ setTimeout(function () {
     var text = String(raw == null ? '' : raw).trim().toUpperCase();
     if (/^\d+$/.test(text)) return text;
     return text === SECRET ? text : '';
-  }
-
-  /**
-   * 场景：数字种子 -> 纯随机秀；敲对了密语 -> 参考图风格。
-   * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
-   */
-  function sceneForSeed(seed, sceneParam) {
-    if (SCENES[sceneParam]) return sceneParam;
-    return seed === SECRET ? 'classic' : 'random';
   }
 
   /**
@@ -1403,7 +1392,6 @@ setTimeout(function () {
     if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.secretFound = (raw === SECRET);
     this.seed = raw;
-    this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -1453,7 +1441,9 @@ setTimeout(function () {
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
-    FW.show.build(this.show, this.scene);
+    FW.show.build(this.show);
+    // 那个词当种子时：开场就插播一次（中途敲对了则当场插播，见 interlude()）
+    if (this.secretFound) this.show.interlude();
     this.acc = 0.0;
     if (this.freezeFrames !== null) {
       // 固定步长走 N 帧后定格（第 1 帧 = step(0)，就是初始几何）
@@ -1465,10 +1455,10 @@ setTimeout(function () {
   };
 
   /**
-   * 换种子 / 换场景 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
-   * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
+   * 换种子 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
+   * 种子认不出来就换一个数字种子。
    */
-  App.prototype.rebuild = function (scene, seed) {
+  App.prototype.rebuild = function (seed) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
       if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
@@ -1476,15 +1466,27 @@ setTimeout(function () {
       this.seed = raw;
       this.store.set('seed', raw);
     }
-    this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 随机换一个数字种子（纯随机秀）。 */
-  App.prototype.reseed = function () { this.rebuild(undefined, FW.rng.defaultSeed()); };
+  /** 随机换一个数字种子。 */
+  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed()); };
+
+  /**
+   * 插播：往**正在放的**这场里塞两发参考图风格（那个词刚被敲对时调用）。
+   * 不重开——画面接着放，只是多了这两发。种子随之变成那个词，所以复制出去的
+   * 链接里也带着它，别人打开会在开场插播同样的一次。
+   */
+  App.prototype.interlude = function () {
+    this.show.interlude();
+    this.secretFound = true;
+    this.seed = SECRET;
+    this.store.set('seed', SECRET);
+    this.syncPanel();
+  };
 
   /* --------------------------------------------------------------- 主循环 */
 
@@ -1568,7 +1570,7 @@ setTimeout(function () {
   };
 
   /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
-  App.prototype.daily = function () { this.rebuild(undefined, FW.rng.dailySeed()); };
+  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed()); };
 
   /**
    * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）
@@ -1576,14 +1578,12 @@ setTimeout(function () {
    */
   App.prototype.shareUrl = function () {
     var q = ['seed=' + encodeURIComponent(this.seed)];
-    if (this.scene !== sceneForSeed(this.seed, undefined)) q.push('scene=' + this.scene);
     if (this.maxGeos !== FW.show.DEFAULT_GEOS) q.push('max=' + this.maxGeos);
     return location.href.split('#')[0].split('?')[0] + '?' + q.join('&');
   };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, SECRET: SECRET,
-             sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
-             seedFromRaw: seedFromRaw };
+  FW.app = { App: App, FIXED_DT: FIXED_DT, SECRET: SECRET,
+             seedContentOk: seedContentOk, seedFromRaw: seedFromRaw };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/ebml.js ===================== */
@@ -1969,7 +1969,6 @@ setTimeout(function () {
     o = o || {};
     var list = [['Software', '烟花 · Fireworks']];
     if (o.seed !== undefined) list.push(['Seed', String(o.seed)]);
-    if (o.scene) list.push(['Scene', String(o.scene)]);
     if (o.url) list.push(['Comment', String(o.url)]);
     if (o.time) list.push(['Creation Time', (o.time instanceof Date ? o.time : new Date(o.time))
       .toISOString()]);
@@ -2099,8 +2098,7 @@ setTimeout(function () {
     // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
     this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
       if (!blob) return;
-      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
-               + secs.toFixed(0) + 's.webm';
+      var name = 'fireworks_seed' + self.seed + '_' + secs.toFixed(0) + 's.webm';
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -2112,14 +2110,14 @@ setTimeout(function () {
   };
 
   /**
-   * 存 PNG。canvas 自己导出的 PNG 是"裸"的，所以这里把**种子、场景、这一场的链接**
-   * 写进它的元数据（iTXt 块，UTF-8；见 src/pngmeta.js）。文件名本来也带场景与种子。
+   * 存 PNG。canvas 自己导出的 PNG 是"裸"的，所以这里把**种子与这一场的链接**
+   * 写进它的元数据（iTXt 块，UTF-8；见 src/pngmeta.js）。文件名也带种子。
    */
   FW.app.App.prototype.savePng = function () {
-    var name = 'fireworks_' + this.scene + '_seed' + this.seed
+    var name = 'fireworks_seed' + this.seed
              + '_t' + this.show.time.toFixed(2) + '.png';
     var tags = FW.pngmeta.tags({
-      seed: this.seed, scene: this.scene, url: this.shareUrl(), time: new Date()
+      seed: this.seed, url: this.shareUrl(), time: new Date()
     });
     function save(blob) {
       var a = document.createElement('a');
@@ -2157,8 +2155,6 @@ setTimeout(function () {
 ;(function (FW) {
   'use strict';
 
-  var SCENES = FW.app.SCENES;
-
   function $(id) { return document.getElementById(id); }
 
   /* ------------------------------------------------------------------ HUD */
@@ -2166,7 +2162,6 @@ setTimeout(function () {
   FW.app.App.prototype.hud = function () {
     var rows = {
       seed: this.seed,
-      scene: this.scene,
       fps: this.fps.toFixed(0),
       budget: this.show.lastGeos + ' / ' + this.show.maxGeos,
       geos: this.renderer.geos,
@@ -2185,13 +2180,12 @@ setTimeout(function () {
     }
   };
 
-  /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
+  /** 把内部状态刷到控件上（换种子 / 插播 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
-    $('scene-help').textContent = SCENES[this.scene][1];
     document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
@@ -2248,9 +2242,10 @@ setTimeout(function () {
       }
       lastValid = text;
       this.value = text;
-      if (text === FW.app.SECRET) {               // 拼全了：换成参考图风格
-        self.rebuild(undefined, text);
-        console.log('%c' + FW.app.SECRET + ' —— 参考图风格', 'color:#ffd34d;font-weight:700');
+      if (text === FW.app.SECRET) {               // 拼全了：当场插播一次
+        self.interlude();
+        console.log('%c' + FW.app.SECRET + ' —— 插播参考图风格的两发',
+                    'color:#ffd34d;font-weight:700');
       }
     });
 
@@ -2264,7 +2259,7 @@ setTimeout(function () {
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(undefined, this.value);
+      if (/^\d+$/.test(this.value)) self.rebuild(this.value);
       else if (this.value === '') self.reseed();
     });
   };
@@ -2275,7 +2270,7 @@ setTimeout(function () {
     $('dice-number').addEventListener('click', function () { self.reseed(); });
     $('pause').addEventListener('click', function () { self.togglePause(); });
     $('extra').addEventListener('click', function () { self.extra(); });
-    $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
+    $('replay').addEventListener('click', function () { self.rebuild(self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
@@ -2323,7 +2318,8 @@ setTimeout(function () {
 
   /**
    * 控制台里那张便条：只交代"种子框认数字"，顺口提一句那个词有几个字母，
-   * 不点破是哪个词（剩下的靠往种子框里一个一个字母试，敲错了会被弹回来）。
+   * 不点破是哪个词，也不说敲对了会换来什么（剩下的靠往种子框里一个一个
+   * 字母试，敲错了会被弹回来）。
    */
   function consoleNote(app) {
     var gold = 'color:#ffd34d;font-weight:600';
@@ -2332,7 +2328,7 @@ setTimeout(function () {
     console.log('seed %c' + app.seed, cyan);
     if (app.secretFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
-      + ' 个字母%c的词是例外 —— 这里正在放的那个，一个一个敲试试。',
+      + ' 个字母%c的词是例外 —— 一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');
   }
 

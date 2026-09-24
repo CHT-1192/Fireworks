@@ -7,7 +7,7 @@
  * 对拍"来定义 —— 那套对拍（tools/verify.js）退化为移植考古，只在确认移植本身
  * 有没有走样时才有意义。
  *
- * 维护版真正需要的是：**改东西时别无意中改别的东西**。所以这里给每个场景拍一份
+ * 维护版真正需要的是：**改东西时别无意中改别的东西**。所以这里给每个种子拍一份
  * "行为指纹"存进 baseline.json：
  *
  *   每帧指纹 = sha256( MT19937 全部 624 状态字 + 图元流 + 图元预算 + 元素数 )
@@ -35,13 +35,8 @@ const W = 924;
 const H = 691;
 const FRAMES = 400;
 
-/** 覆盖到的场景（seed 只对 random 有意义，但都固定下来更省事）。 */
-const SCENES = [
-  { scene: 'classic', seed: 7 },
-  { scene: 'random', seed: 7 },
-  { scene: 'random', seed: 42 },
-  { scene: 'random', seed: 123456 }
-];
+/** 覆盖到的种子（整场秀只有一种；最后一个就是那个词，它会多插播两发）。 */
+const SEEDS = ['7', '42', '123456', 'FIREWORKS'];
 
 // 渲染器也要被指纹覆盖：view.js 只依赖 window（设备像素比/视口）和一个 canvas
 // 上下文，所以给它一个假 canvas 就能在 Node 里跑，把"这一帧下了哪些绘制指令"
@@ -74,7 +69,8 @@ function rngBytes(rng) {
 function runCase(cs) {
   const rng = new FW.rng.Random(cs.seed);
   const show = new FW.show.Show(W, H, rng, { maxGeos: FW.show.DEFAULT_GEOS });
-  FW.show.build(show, cs.scene);
+  FW.show.build(show);
+  if (cs.seed === FW.app.SECRET) show.interlude();      // 与 app.js 的构造路径一致
   const { canvas, ctx, problems } = makeFakeCanvas(W, H);
   const renderer = new FW.view.Renderer(canvas, 2);
   renderer.layout(W, H);
@@ -99,13 +95,13 @@ function runCase(cs) {
   return { sig: sig.join(''), geos: geos.join(','), els: els.join(','), segs: segs.join(',') };
 }
 
-function key(cs) { return `${cs.scene}/seed=${cs.seed}`; }
+function key(cs) { return `seed=${cs.seed}`; }
 
 function collect() {
   const out = { note: '行为基线：每帧指纹 = sha256(RNG 624 状态字 + 图元流 + 预算/元素数 + 渲染绘制指令)，取前 8 位十六进制',
                 dt: DT, width: W, height: H,
                 maxGeos: FW.show.DEFAULT_GEOS, frames: FRAMES, cases: {} };
-  for (const cs of SCENES) out.cases[key(cs)] = runCase(cs);
+  for (const seed of SEEDS) out.cases[`seed=${seed}`] = runCase({ seed });
   return out;
 }
 
@@ -168,7 +164,7 @@ function main() {
     const f = a ? firstDiff(a.sig, b.sig) : -1;
     if (!a) {
       bad++;
-      console.log(` FAIL  ${k.padEnd(28)} 基线里没有这一组（新场景？需要 --update）`);
+      console.log(` FAIL  ${k.padEnd(28)} 基线里没有这一组（新种子？需要 --update）`);
     } else if (f >= 0) {
       bad++;
       console.log(` FAIL  ${k.padEnd(28)} 第 ${f} 帧起行为变化`

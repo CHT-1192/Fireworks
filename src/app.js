@@ -16,14 +16,10 @@
   var MAX_STEPS = 4;                     // 单帧最多追几步
   var DT_CLAMP = 0.06;                   // 单帧最多推进 60ms（同原版）
 
-  var SCENES = {
-    classic: ['参考图风格', '左右两发照参考图的配色与花型'],
-    random: ['纯随机', '配色、花型、位置全随机']
-  };
-
   /**
-   * 种子框只认这一个词。正常只收数字，字母必须一个字符一个字符敲对才留得下来
-   * （敲错的当场被弹回去），所以"一个一个字母试"本身就有反馈。
+   * 种子框只认这一个词。整场秀只有一种（纯随机），这个词换来的不是另一种"场"，
+   * 而是一次**插播**：两发参考图风格的烟花。正常只收数字，字母必须一个字符一个
+   * 字符敲对才留得下来（敲错的当场被弹回去），所以"一个一个字母试"本身就有反馈。
    * 换词就改这一行 —— 提示语里的字母个数会自动跟着变。
    */
   var SECRET = 'FIREWORKS';
@@ -39,15 +35,6 @@
     var text = String(raw == null ? '' : raw).trim().toUpperCase();
     if (/^\d+$/.test(text)) return text;
     return text === SECRET ? text : '';
-  }
-
-  /**
-   * 场景：数字种子 -> 纯随机秀；敲对了密语 -> 参考图风格。
-   * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
-   */
-  function sceneForSeed(seed, sceneParam) {
-    if (SCENES[sceneParam]) return sceneParam;
-    return seed === SECRET ? 'classic' : 'random';
   }
 
   /**
@@ -70,7 +57,6 @@
     if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
     this.secretFound = (raw === SECRET);
     this.seed = raw;
-    this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
@@ -120,7 +106,9 @@
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
-    FW.show.build(this.show, this.scene);
+    FW.show.build(this.show);
+    // 那个词当种子时：开场就插播一次（中途敲对了则当场插播，见 interlude()）
+    if (this.secretFound) this.show.interlude();
     this.acc = 0.0;
     if (this.freezeFrames !== null) {
       // 固定步长走 N 帧后定格（第 1 帧 = step(0)，就是初始几何）
@@ -132,10 +120,10 @@
   };
 
   /**
-   * 换种子 / 换场景 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
-   * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
+   * 换种子 / 重放，整场重开（URL 里的定格帧只在首次加载生效）。
+   * 种子认不出来就换一个数字种子。
    */
-  App.prototype.rebuild = function (scene, seed) {
+  App.prototype.rebuild = function (seed) {
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
       if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
@@ -143,15 +131,27 @@
       this.seed = raw;
       this.store.set('seed', raw);
     }
-    this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
     this.build();
     this.syncPanel();
   };
 
-  /** 随机换一个数字种子（纯随机秀）。 */
-  App.prototype.reseed = function () { this.rebuild(undefined, FW.rng.defaultSeed()); };
+  /** 随机换一个数字种子。 */
+  App.prototype.reseed = function () { this.rebuild(FW.rng.defaultSeed()); };
+
+  /**
+   * 插播：往**正在放的**这场里塞两发参考图风格（那个词刚被敲对时调用）。
+   * 不重开——画面接着放，只是多了这两发。种子随之变成那个词，所以复制出去的
+   * 链接里也带着它，别人打开会在开场插播同样的一次。
+   */
+  App.prototype.interlude = function () {
+    this.show.interlude();
+    this.secretFound = true;
+    this.seed = SECRET;
+    this.store.set('seed', SECRET);
+    this.syncPanel();
+  };
 
   /* --------------------------------------------------------------- 主循环 */
 
@@ -235,7 +235,7 @@
   };
 
   /** 跳到"今天这一场"（同一天永远是同一个数字）。 */
-  App.prototype.daily = function () { this.rebuild(undefined, FW.rng.dailySeed()); };
+  App.prototype.daily = function () { this.rebuild(FW.rng.dailySeed()); };
 
   /**
    * 这一场的链接：基于**当前页面地址**，所以在子路径下托管（比如 GitHub Pages）
@@ -243,12 +243,10 @@
    */
   App.prototype.shareUrl = function () {
     var q = ['seed=' + encodeURIComponent(this.seed)];
-    if (this.scene !== sceneForSeed(this.seed, undefined)) q.push('scene=' + this.scene);
     if (this.maxGeos !== FW.show.DEFAULT_GEOS) q.push('max=' + this.maxGeos);
     return location.href.split('#')[0].split('?')[0] + '?' + q.join('&');
   };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, SECRET: SECRET,
-             sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
-             seedFromRaw: seedFromRaw };
+  FW.app = { App: App, FIXED_DT: FIXED_DT, SECRET: SECRET,
+             seedContentOk: seedContentOk, seedFromRaw: seedFromRaw };
 })(globalThis.FW || (globalThis.FW = {}));

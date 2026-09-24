@@ -93,7 +93,6 @@
     o = o || {};
     var list = [['Software', '烟花 · Fireworks']];
     if (o.seed !== undefined) list.push(['Seed', String(o.seed)]);
-    if (o.scene) list.push(['Scene', String(o.scene)]);
     if (o.url) list.push(['Comment', String(o.url)]);
     if (o.time) list.push(['Creation Time', (o.time instanceof Date ? o.time : new Date(o.time))
       .toISOString()]);

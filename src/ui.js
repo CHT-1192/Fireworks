@@ -9,8 +9,6 @@
 ;(function (FW) {
   'use strict';
 
-  var SCENES = FW.app.SCENES;
-
   function $(id) { return document.getElementById(id); }
 
   /* ------------------------------------------------------------------ HUD */
@@ -18,7 +16,6 @@
   FW.app.App.prototype.hud = function () {
     var rows = {
       seed: this.seed,
-      scene: this.scene,
       fps: this.fps.toFixed(0),
       budget: this.show.lastGeos + ' / ' + this.show.maxGeos,
       geos: this.renderer.geos,
@@ -37,13 +34,12 @@
     }
   };
 
-  /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
+  /** 把内部状态刷到控件上（换种子 / 插播 / 暂停后调用）。 */
   FW.app.App.prototype.syncPanel = function () {
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
-    $('scene-help').textContent = SCENES[this.scene][1];
     document.title = '烟花 · Fireworks · seed ' + this.seed;
     this.applyUiVisibility();
     this.hud();
@@ -100,9 +96,10 @@
       }
       lastValid = text;
       this.value = text;
-      if (text === FW.app.SECRET) {               // 拼全了：换成参考图风格
-        self.rebuild(undefined, text);
-        console.log('%c' + FW.app.SECRET + ' —— 参考图风格', 'color:#ffd34d;font-weight:700');
+      if (text === FW.app.SECRET) {               // 拼全了：当场插播一次
+        self.interlude();
+        console.log('%c' + FW.app.SECRET + ' —— 插播参考图风格的两发',
+                    'color:#ffd34d;font-weight:700');
       }
     });
 
@@ -116,7 +113,7 @@
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(undefined, this.value);
+      if (/^\d+$/.test(this.value)) self.rebuild(this.value);
       else if (this.value === '') self.reseed();
     });
   };
@@ -127,7 +124,7 @@
     $('dice-number').addEventListener('click', function () { self.reseed(); });
     $('pause').addEventListener('click', function () { self.togglePause(); });
     $('extra').addEventListener('click', function () { self.extra(); });
-    $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
+    $('replay').addEventListener('click', function () { self.rebuild(self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
@@ -175,7 +172,8 @@
 
   /**
    * 控制台里那张便条：只交代"种子框认数字"，顺口提一句那个词有几个字母，
-   * 不点破是哪个词（剩下的靠往种子框里一个一个字母试，敲错了会被弹回来）。
+   * 不点破是哪个词，也不说敲对了会换来什么（剩下的靠往种子框里一个一个
+   * 字母试，敲错了会被弹回来）。
    */
   function consoleNote(app) {
     var gold = 'color:#ffd34d;font-weight:600';
@@ -184,7 +182,7 @@
     console.log('seed %c' + app.seed, cyan);
     if (app.secretFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
-      + ' 个字母%c的词是例外 —— 这里正在放的那个，一个一个敲试试。',
+      + ' 个字母%c的词是例外 —— 一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');
   }
 

@@ -47,26 +47,28 @@ function readSecret() {
 
 const DIST_CASES = [
   // 第 1 帧只有两枚上升中的弹体（尾迹还没成形），所以只要求"画了东西"
-  { name: 'classic 第1帧', q: 'scene=classic&seed=7&still=1', time: 0, segs: false, scene: 'classic' },
-  // 种子规则：数字 -> 纯随机秀；拼对那个词 -> 参考图风格；乱敲的字母 -> 不认
-  { name: '数字种子→纯随机', q: 'seed=7&still=1', time: 0, segs: false, scene: 'random' },
-  { name: '那个词→参考图风格', q: 'seed=' + readSecret() + '&still=1', time: 0, segs: false, scene: 'classic' },
-  { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1', time: 0, segs: false, scene: 'random' },
-  { name: 'classic 第150帧', q: 'scene=classic&seed=7&frames=150', time: 149 * DT, segs: true },
-  { name: 'random 第150帧', q: 'scene=random&seed=42&frames=150', time: 149 * DT, segs: true },
-  { name: 'random 第150帧(无UI)', q: 'scene=random&seed=42&frames=150&ui=0', time: 149 * DT, segs: true, uiHidden: true }
+  { name: '数字种子第1帧', q: 'seed=7&still=1', time: 0, segs: false, seed: '7' },
+  // 那个词 = 一次插播：这一帧比普通种子多两发（minFw）
+  { name: '那个词第1帧', q: 'seed=' + readSecret() + '&still=1', time: 0, segs: false,
+    seed: readSecret(), minFw: 4 },
+  { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1', time: 0, segs: false },
+  { name: '老链接的 scene= 被无视', q: 'scene=classic&seed=9&still=1', time: 0, segs: false, seed: '9' },
+  { name: 'seed=42 第150帧', q: 'seed=42&frames=150', time: 149 * DT, segs: true, seed: '42' },
+  { name: 'seed=42 第150帧(无UI)', q: 'seed=42&frames=150&ui=0', time: 149 * DT, segs: true,
+    uiHidden: true, seed: '42' }
 ];
 
 /** 读 HUD（顺便读标题），HUD 缺字段会返回 NaN / null，交给断言去骂。 */
 async function readHud(page) {
   const grab = (id) => page.textContent('#hud-' + id).catch(() => null);
-  const [state, geos, segs, time, scene, title, budget] = await Promise.all([
-    grab('state'), grab('geos'), grab('segs'), grab('time'), grab('scene'),
+  const [state, geos, segs, time, seed, fw, title, budget] = await Promise.all([
+    grab('state'), grab('geos'), grab('segs'), grab('time'), grab('seed'), grab('fw'),
     page.title(), grab('budget')]);
   return {
-    state, scene, title, budget,
+    state, seed, title, budget,
     geos: Number(geos),
     segs: Number(segs),
+    fw: Number(fw),
     time: Number(String(time).replace('s', ''))
   };
 }
@@ -87,7 +89,8 @@ async function check(page, c, where) {
   if (!(h.geos > 0)) problems.push(`图元数 ${h.geos} 不为正 —— 画面是空的`);
   if (c.segs && !(h.segs > 0)) problems.push(`线段数 ${h.segs} 不为正`);
   if (!(Math.abs(h.time - c.time) < 0.05)) problems.push(`时刻 ${h.time}s，预期 ${c.time.toFixed(2)}s`);
-  if (c.scene && h.scene !== c.scene) problems.push(`场景是「${h.scene}」，应为「${c.scene}」`);
+  if (c.seed && h.seed !== c.seed) problems.push(`种子是「${h.seed}」，应为「${c.seed}」`);
+  if (c.minFw && !(h.fw >= c.minFw)) problems.push(`在飞 ${h.fw} 发，插播后应至少 ${c.minFw} 发`);
   if (c.uiHidden) {
     if (!(await page.isHidden('#panel'))) problems.push('?ui=0 但控制台没收起');
     if (!(await page.isHidden('#show'))) problems.push('?ui=0 但恢复按钮还在（应该彻底无 UI）');
@@ -104,7 +107,7 @@ function report(name, r) {
   line(r.problems.length === 0, name,
        `时刻 ${String(h.time).padStart(4)}s  图元 ${String(h.geos).padStart(4)}  `
        + `线段 ${String(h.segs).padStart(4)}  预算 ${String(h.budget).padEnd(11)} `
-       + `场景 ${String(h.scene).padEnd(7)} 状态 ${h.state}`
+       + `种子 ${String(h.seed).padEnd(9)} 状态 ${h.state}`
        + (r.problems.length ? '\n        ' + r.problems.join('\n        ') : ''));
 }
 
@@ -130,12 +133,13 @@ async function checkDist(browser) {
 
 /* ------------------------------------------------------------ B) 开发路径 */
 
-/** 真键盘逐字符拼那个词：敲对留下、敲错弹回、拼全解锁。 */
+/** 真键盘逐字符拼那个词：敲对留下、敲错弹回、拼全当场插播两发。 */
 async function checkTyping(page, secret) {
   const problems = [];
   const steps = [];
   const wrongFirst = secret.charAt(0) === 'Q' ? 'Z' : 'Q';
   const value = () => page.inputValue('#seed');
+  const inFlight = async () => Number(await page.textContent('#hud-fw'));
 
   await page.click('#seed');
   await page.fill('#seed', '');                     // 面板里本来带着上一场的种子
@@ -152,11 +156,15 @@ async function checkTyping(page, secret) {
   steps.push(`中间敲错 -> [${await value()}]`);
   if (await value() !== secret.charAt(0)) problems.push('中途敲错应退回上一个正确前缀');
 
+  // 页面是定格状态（B2 带的 frames=150），所以这期间不会有别的发射来干扰计数
+  const before = await inFlight();
   await page.keyboard.type(secret.slice(1));
-  const scene = await page.textContent('#hud-scene');
-  steps.push(`敲完 -> 场景 ${scene}`);
+  const after = await inFlight();
+  steps.push(`敲完 -> 在飞 ${before} → ${after} 发`);
   if (await value() !== secret) problems.push(`敲完后框里应是那个词，实际 [${await value()}]`);
-  if (scene !== 'classic') problems.push(`敲完后场景应是 classic，实际 ${scene}`);
+  if (after - before !== 2) problems.push(`敲完应插播 2 发，实际多了 ${after - before} 发`);
+  const shown = await page.textContent('#hud-seed');
+  if (shown !== secret) problems.push(`敲完后种子应变成那个词，实际 ${shown}`);
 
   await page.keyboard.press('Enter');               // 回车收焦点
   const focused = await page.evaluate(() => document.activeElement && document.activeElement.id);
@@ -233,7 +241,7 @@ async function checkDev(browser) {
     if (!browser) return bad;
 
     // B2) 多文件这条路也得真的出画面
-    const r0 = await pw.openPage(browser, BASE + '/?scene=classic&seed=7&frames=150',
+    const r0 = await pw.openPage(browser, BASE + '/?seed=7&frames=150',
                                  { viewport: { width: 924, height: 691 } });
     const rDev = await check(r0.page, { time: 149 * DT, segs: true });
     bad += rDev.problems.length;
