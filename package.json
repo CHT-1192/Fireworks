@@ -17,6 +17,7 @@
     "start": "node server.js",
     "dev": "node server.js --open",
     "build": "node build.js",
+    "docs": "node tools/gen_docs.js",
     "check": "node build.js --check",
     "baseline": "node tools/baseline.js",
     "baseline:update": "node tools/baseline.js --update",

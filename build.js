@@ -37,6 +37,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--check') a.check = true;
     else if (argv[i] === '--force') a.force = true;
     else if (argv[i] === '--stamp') a.stamp = true;   // 在产物里写入构建时间（默认不写）
+    else if (argv[i] === '--no-docs') a.noDocs = true; // 不往 docs/ 也放一份
   }
   return a;
 }
@@ -91,6 +92,14 @@ function build(args) {
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, out);
 
+  // 顺带在 docs/ 放一份同样的产物：GitHub Pages 选 "main 分支 /docs 目录" 就能直接
+  // 得到一个链接。每次构建都重写，所以它不会过期；不想留就加 --no-docs。
+  const docsCopy = path.join(ROOT, 'docs', 'index.html');
+  if (!args.noDocs) {
+    fs.mkdirSync(path.dirname(docsCopy), { recursive: true });
+    fs.writeFileSync(docsCopy, out);
+  }
+
   // 产物自检：单文件版必须是自包含的，源码一个都不能漏
   const back = fs.readFileSync(args.out, 'utf8');
   const broken = [];
@@ -111,6 +120,7 @@ function build(args) {
   console.log(`  ${MANIFEST.files.length} 个模块 / ${srcLines} 行 JS + HTML`
     + `  ->  ${(raw / 1024).toFixed(1)} KB（gzip ${(gz / 1024).toFixed(1)} KB）`);
   console.log(`  自检通过: 自包含、无外部脚本、${MANIFEST.files.length} 个模块齐全`);
+  if (!args.noDocs) console.log('  同时写了 docs/index.html（GitHub Pages 可直接托管 /docs）');
   console.log('  直接双击打开，或用任意静态服务器托管都能跑。');
 }
 
