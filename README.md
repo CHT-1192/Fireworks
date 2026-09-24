@@ -24,7 +24,7 @@ npm run verify     # 体量体检 + 渲染自检 + 行为基线（日常就这�
 | 形态 | 命令 | 产物 |
 | --- | --- | --- |
 | 开发 | `npm start` | `index.html` + `src/*.js` 十个模块，按 `src/manifest.json` 顺序注入 `<script>`，改完刷新即可（`no-store`）。默认端口 **9240**（取自参考图宽度 924，避开 Vite 的 5173 等工具链默认端口），`--port` 或 `PORT=` 可改 |
-| 交付 | `npm run build` | 内联成一个自包含 HTML：**69.9 KB（gzip 23.0 KB）**，零外部请求，`file://` 直接跑。构建完会自检"自包含 / 无外部脚本 / 模块齐全"；产物**可复现**（不含时间戳，同样源文件字节一致，`--stamp` 才写） |
+| 交付 | `npm run build` | 内联成一个自包含 HTML：**71.5 KB（gzip 23.8 KB）**，零外部请求，`file://` 直接跑。构建完会自检"自包含 / 无外部脚本 / 模块齐全"；产物**可复现**（不含时间戳，同样源文件字节一致，`--stamp` 才写） |
 
 ## 和 Python 原版的关系
 
@@ -62,7 +62,7 @@ npm run verify     # 体量体检 + 渲染自检 + 行为基线（日常就这�
 | --- | --- | --- | --- |
 | **行为基线** | `npm run baseline` | 每帧指纹 = `sha256(RNG 624 状态字 + 图元流 + 预算/元素数 + 渲染绘制指令)`，5 组 × 400 帧 | 只有**你没打算改**的东西变了才失败。有意改行为就 `npm run baseline:update` 重录，并逐条 review 差异 |
 | **Node 自检** | `npm run smoke` | 假 canvas 校验参数合法性 / 图元是否全被识别 / 绘制开销；另外直接构造 `App` 手动推帧，验证定格帧、固定步长、暂停、异常兜底 | 渲染器接不住新图元、坐标 NaN、颜色漏传、主循环行为跑偏 |
-| **真浏览器** | `npm run browser` | 无头浏览器用 `file://` 打开构建出的单文件版，从 HUD 读数断言：没报错、画面非空、时刻与 `?frames` 一致、`?ui=0` 生效 | 页面在真浏览器里跑不起来（canvas 尺寸、CSS 遮挡、脚本报错） |
+| **真浏览器** | `npm run browser` | 两条路都查：① `file://` 打开构建产物，从 HUD 读数断言"没报错 / 画面非空 / 时刻与 `?frames` 一致 / `?ui=0` 生效"；② 开发服务器的**多文件**页面，额外比对"注入的 `<script>` 列表 == `src/manifest.json`" | 页面在真浏览器里跑不起来（canvas 尺寸、CSS 遮挡、脚本报错、**少加载了模块**） |
 | 跨语言随机数 | `npm run rng` | 与 CPython `random.Random` 逐位对拍（需 python3） | 有人动了 `src/rng.js` |
 
 基线不需要 python3、不需要浏览器，几秒跑完 —— 它是日常开发里真正会天天跑的那一层。它确实
@@ -91,6 +91,10 @@ npm run verify     # 体量体检 + 渲染自检 + 行为基线（日常就这�
 | 体量红线 | 每个文件 ≤ 300 行，`npm run check` 把关 | 目前最大 `src/show.js` 199 行 |
 
 改完的固定动作：`npm run verify`（= 体检 + smoke + 基线），涉及页面就再加 `npm run build && npm run browser`。
+
+**页面起不来时会自己说话**：`index.html` 里有一段兜底自检，1.5 秒内没创建出 App 实例就把
+原因写到页面上（并列出已加载的模块）—— 一个模块都没加载完（例如直接双击未构建的
+`index.html`）和入口模块没执行，以前都只表现为"空白画面 + 控制台零输出"。
 
 ## 操作与参数
 
@@ -140,7 +144,7 @@ tools/
   baseline.js|json    行为基线：录制 / 比对每帧指纹（日常主力）
   render_smoke.js     假 canvas 渲染自检 + Node 里的主循环自检
   fake_canvas.js      假 canvas 上下文 + window/rAF 桩 + 模块加载
-  browser_check.js    真浏览器端到端自检（需 Chrome/Chromium，file:// 打开产物）
+  browser_check.js    真浏览器端到端自检：交付产物 + 开发服务器两条路（需 Chrome/Chromium）
   rng_check.js        MT19937 与 CPython 逐位对拍（需 python3）
   dump_rng.py|js      随机数序列导出（rng_check 用）
   loader.js           在 Node 里按顺序加载 src 模块

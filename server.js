@@ -17,12 +17,22 @@ const path = require('path');
 const { execFile } = require('child_process');
 
 const ROOT = __dirname;
+const MANIFEST_FILE = path.join(ROOT, 'src', 'manifest.json');
 // 默认端口：9240 取自参考图宽度 924（原版 --width 的默认值），也是本项目自己的号；
 // 特意避开各种工具链的默认值 —— 5173 是 Vite、3000 是 Next/Express、8000 是
 // python -m http.server、4173 是 vite preview。这里跟 Vite 没有任何关系。
 const DEFAULT_PORT = 9240;
-const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'manifest.json'), 'utf8'));
 const PLACEHOLDER = '<!--SCRIPTS-->';
+
+/**
+ * **每次都重新读** manifest：开发服务器是长驻进程，而 manifest 会在开发过程中
+ * 增删模块（比如新加了 ui.js）。早先这里缓存了一份，结果"manifest 变了但服务器
+ * 还是注入旧列表"，页面少了入口模块 —— 模块全都加载成功、却什么都没构造，
+ * 表现为**空白画面 + 控制台零输出**，极难排查。缓存这点开销不值得冒这个险。
+ */
+function loadManifest() {
+  return JSON.parse(fs.readFileSync(MANIFEST_FILE, 'utf8'));
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -38,7 +48,10 @@ const MIME = {
 
 function readIndex() {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  const tags = MANIFEST.files
+  const manifest = loadManifest();
+  const missing = manifest.files.filter((f) => !fs.existsSync(path.join(ROOT, 'src', f)));
+  if (missing.length) console.error('manifest 里列了不存在的模块: ' + missing.join(', '));
+  const tags = manifest.files
     .map((f) => `<script src="/src/${f}"></script>`)
     .join('\n');
   return html.replace(PLACEHOLDER, tags);
@@ -103,7 +116,7 @@ function main() {
     const url = `http://${args.host}:${args.port}/`;
     console.log('烟花 · Canvas 复刻版（多文件开发形态）');
     console.log('  ' + url);
-    console.log('  注入的模块: ' + MANIFEST.files.join(' -> '));
+    console.log('  注入的模块: ' + loadManifest().files.join(' -> '));
     console.log('  换端口:     node server.js --port 8080');
     console.log('  单文件版:   npm run build  ->  dist/turtle_fireworks.html（可直接双击打开）');
     if (args.open) execFile('open', [url], () => {});

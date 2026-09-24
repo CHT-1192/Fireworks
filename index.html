@@ -139,6 +139,33 @@
 
 <noscript>这个页面需要 JavaScript。</noscript>
 
+<script>
+/* 兜底自检：如果 1.5 秒后 App 还没被创建出来，就**把原因写在页面上**。
+   一个模块都没加载完 / 入口模块没加载 / 直接双击了未构建的 index.html，
+   这几种情况的共同表现是"空白画面 + 控制台零输出"，没有提示根本无从下手。 */
+setTimeout(function () {
+  var fw = window.FW || {};
+  if (fw.app && fw.app.instance) return;                 // 一切正常
+  var have = Object.keys(fw);
+  var why = !fw.app
+    ? '模块没加载完（连 app.js 都没到）。若你是直接双击 index.html：请用 <b>npm start</b>，'
+      + '或打开构建好的 <b>dist/turtle_fireworks.html</b>。'
+    : '入口模块 ui.js 没执行。检查它是不是 404（src/manifest.json 里列了但文件不在 / 名字写错）'
+      + '或加载时报错 —— 这两种情况都会让页面什么都不构造。';
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);'
+    + 'max-width:min(540px,86vw);padding:18px 20px;border-radius:14px;z-index:9;'
+    + 'background:rgba(6,10,30,.94);border:1px solid rgba(255,138,138,.55);'
+    + 'color:#ffd7d7;font:13px/1.75 system-ui,-apple-system,"PingFang SC",sans-serif';
+  box.innerHTML = '<b style="font-size:15px">烟花没起来</b><br>'
+    + '1.5 秒内没有创建出 App 实例。<br>' + why
+    + '<br><br><span style="color:rgba(255,215,215,.65)">已加载的模块：'
+    + (have.length ? have.join(', ') : '（一个都没有）')
+    + '<br>具体报错请看浏览器控制台。</span>';
+  document.body.appendChild(box);
+}, 1500);
+</script>
+
 <!--SCRIPTS-->
 </body>
 </html>
