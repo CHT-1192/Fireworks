@@ -42,6 +42,16 @@ URL 参数：`?seed=7`、`?scene=classic|random`、`?frames=90`、`?still=1`、`
 「链接」会把这一场的 `seed`（以及非默认的场景与预算）拼到**当前页面地址**上，
 所以托管在子路径下也照样能用。
 
-想在 GitHub Pages 上挂一个链接：`npm run build` 会顺手在 `docs/` 里放一份同样的产物，
-于是仓库 Settings → Pages 选 **main 分支 / `/docs` 目录** 就能直接拿到
-`https://<用户名>.github.io/<仓库名>/`（那份产物每次构建都重写，不会过期）。
+### 线上地址
+
+| 地址 | 是什么 |
+| --- | --- |
+| <https://cht-1192.github.io/Fireworks/> | 这个 Demo 的线上版 |
+| <https://cht-1192.github.io/> | 入口页：三个纯前端 Demo 的入口（另两个是 2D 光线追踪、网页版示波器） |
+
+发布方式：**本仓库自己的 GitHub Pages**，源是 main 分支的 `/docs` 目录 —— `npm run build`
+每次都会把同一份产物同时写进 `dist/` 和 `docs/index.html`（字节一致、可复现），所以线上不会
+落后于代码。**更新线上的步骤就是 `npm run build` 之后提交并推送。**
+
+入口页那边只放一张预览图和一张卡片（指向 `/Fireworks/`），它自带的同步脚本会比对线上产物与
+本地 `dist/` 的哈希，不一致会提醒一句。
