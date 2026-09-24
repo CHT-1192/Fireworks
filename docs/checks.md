@@ -74,7 +74,8 @@ index.html            页面外壳 + 控制台/HUD + 兜底自检（单文件构
 favicon.svg           图标源文件（橙色系烟花，可读可改）
 favicon.js            把图标压成 data URI —— 单文件版必须零外部请求，所以内联
 server.js             零依赖开发服务器（每次请求重读 manifest 并注入模块）
-build.js              npm run build：体量体检 + 打包可复现的单文件（顺带写 docs/index.html）
+build.js              npm run build：体量体检 + 打包可复现的单文件（dist/fireworks.html，顺带写 docs/index.html）
+dist/                 入库的单文件产物 fireworks.html（与 docs/index.html 字节一致）
 src/                  14 个模块 + manifest.json（加载顺序）
 reference/            原版 turtle_fireworks.py（只读留档，无脚本依赖它）
 docs/                 用法 / 校验 / 花型参数表 + preview 实拍图 +（构建出的）index.html

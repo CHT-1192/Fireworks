@@ -120,7 +120,7 @@ function main() {
     console.log('  ' + url);
     console.log('  注入的模块: ' + loadManifest().files.join(' -> '));
     console.log('  换端口:     node server.js --port 8080');
-    console.log('  单文件版:   npm run build  ->  dist/turtle_fireworks.html（可直接双击打开）');
+    console.log('  单文件版:   npm run build  ->  dist/fireworks.html（可直接双击打开）');
     if (args.open) execFile('open', [url], () => {});
   });
 }

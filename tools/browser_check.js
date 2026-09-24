@@ -31,7 +31,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const pw = require('./pw');
 const FWPNG = require('./loader').loadSim(['pngmeta.js']);
 
-const DIST = path.join(pw.ROOT, 'dist', 'turtle_fireworks.html');
+const DIST = path.join(pw.ROOT, 'dist', 'fireworks.html');
 const MANIFEST = path.join(pw.ROOT, 'src', 'manifest.json');
 const PORT = Number(process.env.PORT) || 9240;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -131,7 +131,7 @@ function report(name, r) {
 async function checkDist(browser) {
   console.log('A) 交付路径：file:// 打开构建产物 ' + path.relative(pw.ROOT, DIST));
   if (!fs.existsSync(DIST)) {
-    console.log(' FAIL  dist/turtle_fireworks.html 不存在，先跑 npm run build');
+    console.log(' FAIL  dist/fireworks.html 不存在，先跑 npm run build');
     return 1;
   }
   let bad = 0;

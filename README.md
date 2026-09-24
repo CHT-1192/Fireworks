@@ -11,7 +11,7 @@
 | --- | --- |
 | **在线版** | <https://cht-1192.github.io/Fireworks/> |
 | **入口页** | <https://cht-1192.github.io/> —— 三个纯前端 Demo 的入口（另两个是 2D 光线追踪、网页版示波器） |
-| **离线单文件** | 下载 [dist/turtle_fireworks.html](dist/turtle_fireworks.html)，双击打开。103 KB，零外部请求 |
+| **离线单文件** | 下载 [dist/fireworks.html](dist/fireworks.html)，双击打开。103 KB，零外部请求 |
 | **自己跑开发版** | `npm start` → <http://127.0.0.1:9240/>（不需要 `npm install`） |
 
 ## 怎么玩
@@ -57,7 +57,7 @@ turtle 限制（没有带粗细的折线图元，只能靠图章预算硬凑）�
 
 ```bash
 npm start          # 开发服务器（零依赖，只用 Node 内置模块）
-npm run build      # 打包成单文件 dist/turtle_fireworks.html
+npm run build      # 打包成单文件 dist/fireworks.html
 npm run verify     # 体检 + Node 自检 + 行为基线（日常就这一条）
 npm i && npm run browser   # 真浏览器端到端自检（Playwright 驱动系统已装的 Chromium）
 ```

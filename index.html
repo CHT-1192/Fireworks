@@ -192,7 +192,7 @@ setTimeout(function () {
   var have = Object.keys(fw);
   var why = !fw.app
     ? '模块没加载完（连 app.js 都没到）。若你是直接双击 index.html：请用 <b>npm start</b>，'
-      + '或打开构建好的 <b>dist/turtle_fireworks.html</b>。'
+      + '或打开构建好的 <b>dist/fireworks.html</b>。'
     : '入口模块 ui.js 没执行。检查它是不是 404（src/manifest.json 里列了但文件不在 / 名字写错）'
       + '或加载时报错 —— 这两种情况都会让页面什么都不构造。';
   var box = document.createElement('div');

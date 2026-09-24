@@ -2,7 +2,7 @@
 /* ============================================================================
  * build.js —— 把 index.html + src/*.js 打成**一个自包含的 HTML 文件**
  * ---------------------------------------------------------------------------
- * 产物 dist/turtle_fireworks.html 不依赖服务器、不依赖网络，双击就能放
+ * 产物 dist/fireworks.html 不依赖服务器、不依赖网络，双击就能放
  * （也可以挂到任何静态托管上）。构建时顺带检查每个源文件的体量：
  * 超过 manifest 里的 maxLines（默认 300 行）直接报错退出。
  * 用法：node build.js [--out dist/xxx.html] [--check] [--force]
@@ -31,7 +31,7 @@ function countLines(text) {
 function read(rel) { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); }
 
 function parseArgs(argv) {
-  const a = { out: path.join(ROOT, 'dist', 'turtle_fireworks.html'), check: false,
+  const a = { out: path.join(ROOT, 'dist', 'fireworks.html'), check: false,
               force: false, stamp: false };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--out' || argv[i] === '-o') a.out = path.resolve(argv[++i]);
