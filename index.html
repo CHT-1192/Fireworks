@@ -106,13 +106,9 @@
     <button id="hide">收起 UI</button>
   </div>
 
-  <label>光滑尾迹
-    <input id="dense" type="checkbox" checked>
-  </label>
-
   <label>图元上限
-    <input id="budget" type="range" min="30" max="300" step="10">
-    <b id="budget-val">130</b>
+    <input id="budget" type="range" min="80" max="1500" step="20">
+    <b id="budget-val">450</b>
   </label>
 
   <p class="hint">
@@ -120,8 +116,8 @@
     URL 参数：<code>?scene=original&amp;still=1</code>（= 参考图那一帧）、
     <code>?frames=90</code>（定格第 90 帧）、<code>?ui=0</code>（无 UI 截图）、
     <code>?seed=7&amp;max=200</code><br>
-    同一个 seed 就是同一场烟花，与 Python 原版逐位一致。<br>
-    「光滑尾迹」只用 canvas 的圆头描边画得更细，不影响任何一颗火星；关掉（<code>?exact=1</code>）即回到原版 2~6 段折线的口径。
+    同一个 seed 每次都是同一场（固定 1/60 步长推进）。<br>
+    「图元上限」按实际绘制开销算（折线按段数），画不动就往下调。
   </p>
 </aside>
 

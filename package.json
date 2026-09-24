@@ -21,8 +21,8 @@
     "baseline": "node tools/baseline.js",
     "baseline:update": "node tools/baseline.js --update",
     "smoke": "node tools/render_smoke.js",
-    "verify": "node tools/verify.js",
-    "verify:long": "node tools/verify.js --frames 400 --seeds 7,42,123456",
-    "verify:render": "node tools/render_smoke.js && bash tools/render_check.sh"
+    "browser": "node tools/browser_check.js",
+    "rng": "node tools/rng_check.js",
+    "verify": "node build.js --check && node tools/render_smoke.js && node tools/baseline.js"
   }
 }

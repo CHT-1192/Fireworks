@@ -90,6 +90,19 @@ function build(args) {
 
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, out);
+
+  // 产物自检：单文件版必须是自包含的，源码一个都不能漏
+  const back = fs.readFileSync(args.out, 'utf8');
+  const broken = [];
+  if (back.includes(PLACEHOLDER)) broken.push('占位符没被替换');
+  if (/<script[^>]+src=/.test(back)) broken.push('还引用了外部脚本');
+  for (const f of MANIFEST.files) {
+    if (!back.includes(`===== src/${f} =====`)) broken.push(`漏了 src/${f}`);
+  }
+  if (broken.length) {
+    console.error('产物自检失败: ' + broken.join('；'));
+    process.exit(1);
+  }
   const raw = Buffer.byteLength(out);
   const gz = zlib.gzipSync(Buffer.from(out)).length;
   const rel = path.relative(ROOT, args.out);
@@ -97,6 +110,7 @@ function build(args) {
     + `  (${new Date().toISOString().replace('T', ' ').slice(0, 19)})`);
   console.log(`  ${MANIFEST.files.length} 个模块 / ${srcLines} 行 JS + HTML`
     + `  ->  ${(raw / 1024).toFixed(1)} KB（gzip ${(gz / 1024).toFixed(1)} KB）`);
+  console.log(`  自检通过: 自包含、无外部脚本、${MANIFEST.files.length} 个模块齐全`);
   console.log('  直接双击打开，或用任意静态服务器托管都能跑。');
 }
 

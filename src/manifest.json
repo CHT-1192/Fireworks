@@ -1,5 +1,5 @@
 {
-  "entry": "app.js",
+  "entry": "ui.js",
   "maxLines": 300,
   "files": [
     "core.js",
@@ -10,6 +10,7 @@
     "firework.js",
     "show.js",
     "view.js",
-    "app.js"
+    "app.js",
+    "ui.js"
   ]
 }

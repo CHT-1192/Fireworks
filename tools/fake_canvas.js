@@ -107,13 +107,18 @@ FakeCtx.prototype.stroke = function () {
 function stubWindow(w, h, dpr) {
   global.window = { devicePixelRatio: dpr === undefined ? 1 : dpr,
                     innerWidth: w, innerHeight: h };
+  // 主循环用 requestAnimationFrame 排下一帧；Node 里没有，桩成空实现
+  // （测试直接调 stepFrame/tick，自己控制时间戳）
+  global.requestAnimationFrame = function () { return 0; };
 }
 
-/** 仿真模块 + 渲染器一起加载（渲染器本身不需要 DOM 就能被驱动）。 */
+/** 仿真 + 渲染器 + 应用核心一起加载（这三者都不需要 DOM；ui.js 才需要）。 */
 function loadWithRenderer() {
   const FW = loadSim();
-  vm.runInThisContext(fs.readFileSync(path.join(ROOT, 'src', 'view.js'), 'utf8'),
-                      { filename: 'src/view.js' });
+  for (const f of ['view.js', 'app.js']) {
+    vm.runInThisContext(fs.readFileSync(path.join(ROOT, 'src', f), 'utf8'),
+                        { filename: 'src/' + f });
+  }
   return FW;
 }
 

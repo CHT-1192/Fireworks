@@ -168,21 +168,19 @@
     if (this.twinkle && k < 0.34 && this.show.rng.random() < 0.35) {
       shade *= this.show.rng.uniform(0.15, 1.0);          // 末期随机闪烁
     }
-    var geos = [], i;
+    var geos = [];
     if (this.track.length) {
       var now = this.show.time;
       // 记录点 + 这一帧的「活头端」，保证尾迹始终连在火花身上
       var pts = this.track.concat([[this.x, this.y, now]]);
-      var q = decimate(pts, this.trailSeg);               // 原版口径（图章预算）
-      var base = this.trailSegs(q, shade);
-      // canvas 增强：把**真实轨迹**整条采出来，圆头描边连成光滑曲线。图元预算仍按
-      // 原版口径结算（cost = base.length），所以密度节流与随机数流一点没变。
-      // trail_seg=1 按定义就是一条直线（参考图那 14 条辐条），不细采样。
-      if (this.show.denseTrails && this.trailSeg > 1 && pts.length > q.length) {
-        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
-        if (dense.length) geos.push(pathGeo(dense, base.length));
+      if (this.trailSeg === 1) {
+        // trail_seg=1 的语义就是「一条直线」（参考图那 14 条辐条），不细采样
+        var seg = this.trailSegs([pts[0], pts[pts.length - 1]], shade)[0];
+        if (seg) geos.push(rayGeo(seg));
       } else {
-        for (i = 0; i < base.length; i++) geos.push(rayGeo(base[i]));
+        // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
+        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
+        if (dense.length) geos.push(pathGeo(dense));
       }
     }
     var r = this.size * (0.55 + 0.45 * shade);

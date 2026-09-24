@@ -75,7 +75,7 @@
     };
   }
 
-  /** 单段射线（原版口径）：由 [x0, y0, x1, y1, color, half] 直接生成一个 RAY 图元。 */
+  /** 单段直线图元（矩形填充）：由 [x0, y0, x1, y1, color, half] 生成一个 RAY 图元。 */
   function rayGeo(s) {
     var dx = s[2] - s[0], dy = s[3] - s[1];
     return geo(RAY, s[4], s[0], s[1], Math.atan2(dy, dx) * FW.core.RAD2DEG,
@@ -83,19 +83,18 @@
   }
 
   /**
-   * **折线图元**：把整条尾迹的多段打包成一个图元，交给 canvas 用圆头圆角一次
-   * 描边连成光滑带子。这是原版做不到的事 —— turtle 没有"带粗细的折线"，只能
-   * 一段轨迹盖一个矩形图章，所以尾迹看着是一节一节的，弯道处还会折成多边形。
+   * **折线图元**：把一条尾迹的多段打包成一个图元，交给 canvas 用圆头圆角描边连成
+   * 一条光滑带子。turtle 没有"带粗细的折线"，只能一段轨迹盖一个矩形图章，所以原版
+   * 的尾迹是一节一节的；canvas 直接描边就没有这个问题。
    *
-   * segs 与单段射线同格式：[[x0, y0, x1, y1, color, half], ...]
-   * cost = 这一帧它在 **Python 口径**下算几个图元。图元预算 / 密度节流仍按原版
-   *        口径统计，所以"画得更细"不会改变任何一颗火星的位置与随机数消耗 ——
-   *        同 seed 依然是同一场。这是**兼容层**（服务于行为基线与原版对拍），
-   *        新特性不必继承这个口径。
+   * segs 格式与单段直线相同：[[x0, y0, x1, y1, color, half], ...]
    */
-  function pathGeo(segs, cost) { return { shape: PATH, segs: segs, cost: cost }; }
+  function pathGeo(segs) { return { shape: PATH, segs: segs }; }
 
-  /** 增强模式的细采样上限（段）：远超原版的图章预算，肉眼已看不出折线。 */
+  /** 一个图元实际要画几个基本图元：折线按段数算，其余各算 1。图元预算是它的和。 */
+  function drawnCost(g) { return g.segs ? g.segs.length : 1; }
+
+  /** 尾迹细采样上限（段）：肉眼已看不出折线，同时兜住单条尾迹的开销。 */
   var DENSE = { spark: 14, trail: 48 };
 
   /* --------------------------------------------- 原版复刻（截图实测数据） */
@@ -170,7 +169,8 @@
   FW.data = {
     Palette: Palette, HALLOWEEN: HALLOWEEN, MATRIX: MATRIX, randomPalette: randomPalette,
     DOT: DOT, RAY: RAY, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS, RAY_PTS: RAY_PTS,
-    SHAPES: SHAPES, geo: geo, rayGeo: rayGeo, pathGeo: pathGeo, DENSE: DENSE,
+    SHAPES: SHAPES, geo: geo, rayGeo: rayGeo, pathGeo: pathGeo,
+    drawnCost: drawnCost, DENSE: DENSE,
     STYLES: STYLES, STYLE_NAMES: STYLE_NAMES, ORIGINAL: ORIGINAL
   };
 })(globalThis.FW || (globalThis.FW = {}));

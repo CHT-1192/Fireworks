@@ -1,7 +1,7 @@
 <!--
   烟花 · Canvas 复刻版 —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
-  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js
+  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> ui.js
 -->
 <!doctype html>
 <html lang="zh-CN">
@@ -111,13 +111,9 @@
     <button id="hide">收起 UI</button>
   </div>
 
-  <label>光滑尾迹
-    <input id="dense" type="checkbox" checked>
-  </label>
-
   <label>图元上限
-    <input id="budget" type="range" min="30" max="300" step="10">
-    <b id="budget-val">130</b>
+    <input id="budget" type="range" min="80" max="1500" step="20">
+    <b id="budget-val">450</b>
   </label>
 
   <p class="hint">
@@ -125,8 +121,8 @@
     URL 参数：<code>?scene=original&amp;still=1</code>（= 参考图那一帧）、
     <code>?frames=90</code>（定格第 90 帧）、<code>?ui=0</code>（无 UI 截图）、
     <code>?seed=7&amp;max=200</code><br>
-    同一个 seed 就是同一场烟花，与 Python 原版逐位一致。<br>
-    「光滑尾迹」只用 canvas 的圆头描边画得更细，不影响任何一颗火星；关掉（<code>?exact=1</code>）即回到原版 2~6 段折线的口径。
+    同一个 seed 每次都是同一场（固定 1/60 步长推进）。<br>
+    「图元上限」按实际绘制开销算（折线按段数），画不动就往下调。
   </p>
 </aside>
 
@@ -460,7 +456,7 @@
     };
   }
 
-  /** 单段射线（原版口径）：由 [x0, y0, x1, y1, color, half] 直接生成一个 RAY 图元。 */
+  /** 单段直线图元（矩形填充）：由 [x0, y0, x1, y1, color, half] 生成一个 RAY 图元。 */
   function rayGeo(s) {
     var dx = s[2] - s[0], dy = s[3] - s[1];
     return geo(RAY, s[4], s[0], s[1], Math.atan2(dy, dx) * FW.core.RAD2DEG,
@@ -468,19 +464,18 @@
   }
 
   /**
-   * **折线图元**：把整条尾迹的多段打包成一个图元，交给 canvas 用圆头圆角一次
-   * 描边连成光滑带子。这是原版做不到的事 —— turtle 没有"带粗细的折线"，只能
-   * 一段轨迹盖一个矩形图章，所以尾迹看着是一节一节的，弯道处还会折成多边形。
+   * **折线图元**：把一条尾迹的多段打包成一个图元，交给 canvas 用圆头圆角描边连成
+   * 一条光滑带子。turtle 没有"带粗细的折线"，只能一段轨迹盖一个矩形图章，所以原版
+   * 的尾迹是一节一节的；canvas 直接描边就没有这个问题。
    *
-   * segs 与单段射线同格式：[[x0, y0, x1, y1, color, half], ...]
-   * cost = 这一帧它在 **Python 口径**下算几个图元。图元预算 / 密度节流仍按原版
-   *        口径统计，所以"画得更细"不会改变任何一颗火星的位置与随机数消耗 ——
-   *        同 seed 依然是同一场。这是**兼容层**（服务于行为基线与原版对拍），
-   *        新特性不必继承这个口径。
+   * segs 格式与单段直线相同：[[x0, y0, x1, y1, color, half], ...]
    */
-  function pathGeo(segs, cost) { return { shape: PATH, segs: segs, cost: cost }; }
+  function pathGeo(segs) { return { shape: PATH, segs: segs }; }
 
-  /** 增强模式的细采样上限（段）：远超原版的图章预算，肉眼已看不出折线。 */
+  /** 一个图元实际要画几个基本图元：折线按段数算，其余各算 1。图元预算是它的和。 */
+  function drawnCost(g) { return g.segs ? g.segs.length : 1; }
+
+  /** 尾迹细采样上限（段）：肉眼已看不出折线，同时兜住单条尾迹的开销。 */
   var DENSE = { spark: 14, trail: 48 };
 
   /* --------------------------------------------- 原版复刻（截图实测数据） */
@@ -555,7 +550,8 @@
   FW.data = {
     Palette: Palette, HALLOWEEN: HALLOWEEN, MATRIX: MATRIX, randomPalette: randomPalette,
     DOT: DOT, RAY: RAY, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS, RAY_PTS: RAY_PTS,
-    SHAPES: SHAPES, geo: geo, rayGeo: rayGeo, pathGeo: pathGeo, DENSE: DENSE,
+    SHAPES: SHAPES, geo: geo, rayGeo: rayGeo, pathGeo: pathGeo,
+    drawnCost: drawnCost, DENSE: DENSE,
     STYLES: STYLES, STYLE_NAMES: STYLE_NAMES, ORIGINAL: ORIGINAL
   };
 })(globalThis.FW || (globalThis.FW = {}));
@@ -731,21 +727,19 @@
     if (this.twinkle && k < 0.34 && this.show.rng.random() < 0.35) {
       shade *= this.show.rng.uniform(0.15, 1.0);          // 末期随机闪烁
     }
-    var geos = [], i;
+    var geos = [];
     if (this.track.length) {
       var now = this.show.time;
       // 记录点 + 这一帧的「活头端」，保证尾迹始终连在火花身上
       var pts = this.track.concat([[this.x, this.y, now]]);
-      var q = decimate(pts, this.trailSeg);               // 原版口径（图章预算）
-      var base = this.trailSegs(q, shade);
-      // canvas 增强：把**真实轨迹**整条采出来，圆头描边连成光滑曲线。图元预算仍按
-      // 原版口径结算（cost = base.length），所以密度节流与随机数流一点没变。
-      // trail_seg=1 按定义就是一条直线（参考图那 14 条辐条），不细采样。
-      if (this.show.denseTrails && this.trailSeg > 1 && pts.length > q.length) {
-        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
-        if (dense.length) geos.push(pathGeo(dense, base.length));
+      if (this.trailSeg === 1) {
+        // trail_seg=1 的语义就是「一条直线」（参考图那 14 条辐条），不细采样
+        var seg = this.trailSegs([pts[0], pts[pts.length - 1]], shade)[0];
+        if (seg) geos.push(rayGeo(seg));
       } else {
-        for (i = 0; i < base.length; i++) geos.push(rayGeo(base[i]));
+        // 沿真实轨迹细采样，圆头描边连成一条光滑曲线
+        var dense = this.trailSegs(decimate(pts, Math.min(pts.length - 1, DENSE.spark)), shade);
+        if (dense.length) geos.push(pathGeo(dense));
       }
     }
     var r = this.size * (0.55 + 0.45 * shade);
@@ -804,7 +798,6 @@
     this.cool = o.cool;
     this.fadeTime = o.fadeTime === undefined ? 3.4 : o.fadeTime;
     this.minStep = o.minStep === undefined ? 9.0 : o.minStep;
-    this.segMax = o.segMax === undefined ? 6 : o.segMax;
     this.maxPts = o.maxPts === undefined ? 80 : o.maxPts;
   }
   Trail.prototype = Object.create(Element.prototype);
@@ -835,14 +828,9 @@
     var tail = this.pts[this.pts.length - 1];
     var pts = (this.head === tail) ? this.pts : this.pts.concat([this.head]);
     if (pts.length < 2) return [];
-    var q = decimate(pts, this.segMax);                   // 原版口径（图章预算）
-    var base = this.segsFor(q);
-    // canvas 增强：整条真实飞行轨迹一次描边（原版只能盖 6 个图章）
-    if (this.show.denseTrails && pts.length > q.length) {
-      var dense = this.segsFor(decimate(pts, Math.min(pts.length - 1, DENSE.trail)));
-      if (dense.length) return [pathGeo(dense, base.length)];
-    }
-    return base.map(rayGeo);
+    // 整条真实飞行轨迹一次描边（原版受图章预算限制只能画 6 段）
+    var segs = this.segsFor(decimate(pts, Math.min(pts.length - 1, DENSE.trail)));
+    return segs.length ? [pathGeo(segs)] : [];
   };
 
   /** 把抽稀后的轨迹点连成线段：[x0, y0, x1, y1, color, half]（原版的取色/取宽公式）。 */
@@ -1075,18 +1063,21 @@
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
   var STYLE_NAMES = data.STYLE_NAMES, ORIGINAL = data.ORIGINAL;
   var stemSegments = FW.elements.stemSegments, FixedLine = FW.elements.FixedLine;
-  var Spark = FW.elements.Spark;
+  var Spark = FW.elements.Spark, drawnCost = data.drawnCost;
+
+  //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
+  //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
+  //: 注意节流是启发式的（只影响后续发射的火花数），所以单帧峰值会超过预算。
+  var DEFAULT_GEOS = 450;
 
   function Show(w, h, rng, o) {
     o = o || {};
     this.w = w;
     this.h = h;
     this.rng = rng;
-    // 图元预算：一帧里所有元素画出的图元总数（性能保护）
-    this.maxGeos = (o.maxGeos === undefined) ? 130 : o.maxGeos;
-    // 增强模式：尾迹沿真实轨迹细采样（只影响画法，不影响物理/随机数）。
-    // 可在运行中随时开关（读的就是这个字段）。
-    this.denseTrails = (o.denseTrails === undefined) ? true : o.denseTrails;
+    // 绘制预算：一帧里**实际**画出多少个基本图元（折线按段数算）—— 它直接对应
+    // canvas 的描边/填充开销，也是 density() 节流的依据。
+    this.maxGeos = (o.maxGeos === undefined) ? DEFAULT_GEOS : o.maxGeos;
     this.lastGeos = 0;
     this.elements = [];
     this.fireworks = [];
@@ -1100,7 +1091,7 @@
 
   Show.prototype.add = function (e) { this.elements.push(e); };
 
-  /** 画布快满了就少放几颗火星（烟花照放，只是稀一点）。 */
+  /** 画布快满了就少放几颗火星（烟花照放，只是稀一点）。依据是上一帧的实际图元数。 */
   Show.prototype.density = function () {
     if (this.maxGeos <= 0) return 1.0;
     var ratio = this.lastGeos / this.maxGeos;
@@ -1213,14 +1204,12 @@
     for (i = 0; i < els.length; i++) els[i].update(dt);
 
     // 2) 出图元。临死这帧同样要调 frame()（它可能消耗 rng），只是不画出来。
-    //    预算按 Python 口径结算：折线图元用它自己报的 cost（见 data.pathGeo）。
-    //    这是**兼容层**，只为保留原版的密度节流口径、方便与原版对拍；新特性不受它
-    //    约束 —— 真要按开销算，应该按实际描边段数（renderer.segs）重定义这个预算。
+    //    预算按实际绘制开销结算（折线按段数），所以它反映的就是这一帧要画多少东西。
     var total = 0, out = [];
     for (i = 0; i < els.length; i++) {
       var e = els[i];
       var geos = e.frame();
-      for (j = 0; j < geos.length; j++) total += (geos[j].cost === undefined ? 1 : geos[j].cost);
+      for (j = 0; j < geos.length; j++) total += drawnCost(geos[j]);
       if (e.alive) for (j = 0; j < geos.length; j++) out.push(geos[j]);
     }
     this.frameGeos = out;
@@ -1252,7 +1241,7 @@
     else show.spawnRandom(2);
   }
 
-  FW.show = { Show: Show, build: build };
+  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/view.js ===================== */
@@ -1390,21 +1379,21 @@
 
 /* ===================== src/app.js ===================== */
 /* ============================================================================
- * app.js —— 浏览器外壳：固定步长主循环 + 键盘 / 控制台 + HUD
- * 对应 turtle_fireworks.py 的 TurtleApp 与命令行一节。
+ * app.js —— 应用核心：状态 + 固定步长主循环
  * ---------------------------------------------------------------------------
- * 和原版的两处有意的差别：
- *   * 原版用 ontimer + 实测帧间隔 dt 推进（帧率抖动会改变整场演出）；
- *     这里改成**固定 1/60 步长 + 累加器**，所以「同 seed = 同一场」在浏览器里
- *     是严格成立的，也正好对上原版 --render 的固定步长。
- *   * original 场景的逻辑坐标固定为参考图的 924×691，窗口再大也是完整构图
- *     （等比缩放居中），而不是被裁掉。
+ * 这里**不碰 DOM**：构造时只接收一个 canvas 和 URL 查询参数，HUD / 控制台 / 键盘
+ * 全部通过下面这些钩子交给 src/ui.js 实现（钩子默认是空操作）。好处：
+ *   * app.js 能在 Node 里直接构造、手动推进来测（真浏览器那一段交给 browser_check）
+ *   * UI 改动不会碰到主循环，主循环改动不会碰到 DOM
+ *
+ * 主循环用**固定 1/60 步长累加器**推进物理（不是跟着 rAF 的实测 dt），所以同一个
+ * seed 每次都能放出一模一样的一场；单帧最多追 4 步，掉帧不雪崩。
  * ==========================================================================*/
 ;(function (FW) {
   'use strict';
 
-  var FIXED_DT = 1 / 60;                 // 固定步长（= 原版 --render 的 60fps）
-  var MAX_STEPS = 4;                     // 单帧最多追几步，避免掉帧后雪崩
+  var FIXED_DT = 1 / 60;                 // 固定步长（= 原版离线渲染的 60fps）
+  var MAX_STEPS = 4;                     // 单帧最多追几步
   var DT_CLAMP = 0.06;                   // 单帧最多推进 60ms（同原版）
   var ORIGINAL = FW.data.ORIGINAL;
 
@@ -1414,31 +1403,28 @@
     original: ['原版复刻', '按截图实测坐标/颜色摆出那两发烟花（可与参考图逐帧对比）']
   };
 
-  function $(id) { return document.getElementById(id); }
-
-  function App() {
-    var q = new URLSearchParams(location.search);
-    this.canvas = $('stage');
+  /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
+  function App(opts) {
+    var q = opts.search;
+    this.canvas = opts.canvas;
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
     this.scene = SCENES[q.get('scene')] ? q.get('scene') : 'classic';
     this.seed = parseInt(q.get('seed'), 10);
     if (!(this.seed >= 0)) this.seed = FW.rng.defaultSeed();
-    this.maxGeos = parseInt(q.get('max'), 10) || 130;
-    // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关，
-    // 还原 Python 那一场 / 逐像素对拍时必须用。
+    this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
+    // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
     this.forceW = parseInt(q.get('w'), 10) || 0;
     this.forceH = parseInt(q.get('h'), 10) || 0;
-    // ?frames=N 与 --render --frames N 同一条路径；?still=1 等价于 frames=1（参考图那一帧）
+    // ?frames=N 先走 N 个固定步再定格；?still=1 等价于 frames=1（参考图那一帧）
     if (q.has('frames')) this.freezeFrames = Math.max(1, parseInt(q.get('frames'), 10) || 1);
     else if (q.get('still') === '1' || q.get('still') === '') this.freezeFrames = 1;
     else this.freezeFrames = null;
+    this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
 
     this.paused = false;
-    this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
-    // 光滑尾迹（canvas 增强）：?exact=1 关掉，退回原版的 2~6 段折线口径（兼容层，
-    // 供行为基线与原版逐像素对拍使用；日常用法不必关心）
-    this.denseTrails = (q.get('exact') !== '1');
+    this.crashed = false;
+    this.uiHidden = false;
     this.acc = 0.0;
     this.frames = 0;
     this.fps = 0;
@@ -1450,68 +1436,83 @@
     this.bindPanel();
     this.bindKeys();
     this.syncPanel();
-    if (this.hideUi) this.hideAllUi();
-    this.last = performance.now();
-    var self = this;
-    requestAnimationFrame(function (t) { self.tick(t); });
+    // 同步画第一帧：避免开局空窗，也让"页面到底跑没跑起来"能直接从 DOM 读到
+    // （无头 --dump-dom 模式下 rAF 不保证触发）
+    this.fit();
+    this.renderer.draw(this.show.frameGeos);
+    this.hud();
   }
+
+  /* ---------------------------------------------------- UI 钩子（ui.js 覆盖） */
+
+  App.prototype.hud = function () {};
+  App.prototype.syncPanel = function () {};
+  App.prototype.bindPanel = function () {};
+  App.prototype.bindKeys = function () {};
+  App.prototype.onError = function (err) { console.error(err); };
 
   /* ------------------------------------------------------------ 构建 / 重开 */
 
   App.prototype.build = function () {
-    var cw = this.canvas.clientWidth || window.innerWidth;
-    var ch = this.canvas.clientHeight || window.innerHeight;
+    var cw = this.canvas.clientWidth || this.canvas.width || 1;
+    var ch = this.canvas.clientHeight || this.canvas.height || 1;
     var lw, lh;
     if (this.forceW && this.forceH) { lw = this.forceW; lh = this.forceH; }
     else if (this.scene === 'original') { lw = ORIGINAL.W; lh = ORIGINAL.H; }
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
-                                 { maxGeos: this.maxGeos, denseTrails: this.denseTrails });
+                                 { maxGeos: this.maxGeos });
     FW.show.build(this.show, this.scene);
     this.acc = 0.0;
     if (this.freezeFrames !== null) {
-      // 与 --render 完全同一条路径：先 step(0) 出初始几何，再走 N-1 个 1/60 步
+      // 固定步长走 N 帧后定格（第 1 帧 = step(0)，就是初始几何）
       this.show.step(0.0);
       for (var i = 1; i < this.freezeFrames; i++) this.show.step(FIXED_DT);
       this.paused = true;
     }
     this.renderer.layout(this.show.w, this.show.h);
-    document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
-    this.syncPanel();
   };
 
-  /** 换场景 / 换种子 / 重放：整场重开。 */
+  /** 换场景 / 换种子 / 重放：整场重开（URL 里的定格帧只在首次加载生效）。 */
   App.prototype.rebuild = function (scene, seed) {
     if (scene !== undefined && scene !== null) this.scene = scene;
     if (seed !== undefined && seed !== null) this.seed = seed;
-    this.freezeFrames = null;                    // URL 的定格帧只在首次加载生效
+    this.freezeFrames = null;
     this.paused = false;
     this.build();
+    this.syncPanel();
+  };
+
+  /** 定格成参考图那一帧（第 1 帧）。 */
+  App.prototype.stillFrame = function () {
+    this.rebuild('original', this.seed);
+    this.show.step(0.0);
+    this.paused = true;
+    this.syncPanel();
   };
 
   /* --------------------------------------------------------------- 主循环 */
+
+  App.prototype.start = function () {
+    this.last = performance.now();
+    this.fpsT = this.last;
+    var self = this;
+    requestAnimationFrame(function (t) { self.tick(t); });
+  };
 
   App.prototype.tick = function (now) {
     try {
       this.stepFrame(now);
     } catch (err) {
-      // 与原版 TurtleApp.tick 一样不让一帧的异常把窗口卡死：原版打印 traceback 后
-      // 停掉；这里把错误摆到 HUD 上 —— canvas 里 rAF 抛的异常默认是看不见的。
       this.crashed = true;
-      console.error(err);
-      $('panel').hidden = false;
-      $('hud').hidden = false;
-      $('show').hidden = true;
-      var st = $('hud-state');
-      st.textContent = '出错: ' + err.message;
-      st.style.color = '#ff8a8a';
-      return;                                  // 不再排下一帧
+      this.paused = true;
+      this.onError(err);      // ui.js 会把错误摆到 HUD 上：rAF 里的异常默认看不见
+      return;                 // 不再排下一帧
     }
     var self = this;
     requestAnimationFrame(function (t) { self.tick(t); });
   };
 
-  /** 一帧：固定步长推进 + 重绘 + HUD（异常由 tick 兜住）。 */
   App.prototype.stepFrame = function (now) {
     var dt = (now - this.last) / 1000;
     this.last = now;
@@ -1540,19 +1541,51 @@
     }
   };
 
-  /** 窗口尺寸变了：重算适配缩放；非 original 场景顺带把逻辑尺寸铺满窗口。 */
+  /** 窗口尺寸变了：重算适配缩放；未钉死坐标系的场景顺带把逻辑尺寸铺满窗口。 */
   App.prototype.fit = function () {
-    var cw = this.canvas.clientWidth || window.innerWidth;
-    var ch = this.canvas.clientHeight || window.innerHeight;
+    var cw = this.canvas.clientWidth || this.canvas.width || 1;
+    var ch = this.canvas.clientHeight || this.canvas.height || 1;
     if (cw === this.renderer.cw && ch === this.renderer.ch) return;
     var pinned = (this.forceW && this.forceH) || this.scene === 'original';
     if (!pinned) { this.show.w = cw; this.show.h = ch; }
     this.renderer.layout(this.show.w, this.show.h);
   };
 
+  /* ---------------------------------------------------------------- 操作 */
+
+  App.prototype.togglePause = function () {
+    if (this.paused && this.freezeFrames !== null) {
+      this.freezeFrames = null;     // 从定格帧接着往下放（复刻图 -> 会动的复刻版）
+    }
+    this.paused = !this.paused;
+    this.acc = 0.0;
+    this.syncPanel();
+  };
+
+  App.prototype.extra = function () { this.show.spawnRandom(1); };
+
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/ui.js ===================== */
+/* ============================================================================
+ * ui.js —— 所有 DOM：控制台、HUD、键盘、存 PNG、入口启动
+ * ---------------------------------------------------------------------------
+ * app.js 只留状态与主循环，并留了一组钩子（hud / syncPanel / bindPanel /
+ * bindKeys / onError）；这里把那组钩子实现出来，然后在 DOM 就绪后创建 App。
+ * 之所以把"启动"也放在这里：脚本按 manifest 顺序加载，本文件是最后一个，
+ * 保证 App 的钩子在被构造之前就已就位。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  var SCENES = FW.app.SCENES;
+
+  function $(id) { return document.getElementById(id); }
+
   /* ------------------------------------------------------------------ HUD */
 
-  App.prototype.hud = function () {
+  FW.app.App.prototype.hud = function () {
     $('hud-seed').textContent = this.seed;
     $('hud-scene').textContent = this.scene;
     $('hud-fps').textContent = this.fps.toFixed(0);
@@ -1565,35 +1598,49 @@
       + (Math.abs(this.renderer.scale - 1) > 1e-6 ? ' @' + this.renderer.scale.toFixed(2) : '');
     $('hud-time').textContent = this.show.time.toFixed(1) + 's';
     $('hud-state').textContent = this.paused
-      ? (this.freezeFrames !== null || this.show.time === 0 ? '已定格' : '已暂停')
+      ? ((this.freezeFrames !== null || this.show.time === 0) ? '已定格' : '已暂停')
       : '运行中';
   };
 
-  /** 把内部状态刷到控件上（换场景/换种子后调用）。 */
-  App.prototype.syncPanel = function () {
+  /** 把内部状态刷到控件上（换场景 / 换种子 / 暂停后调用）。 */
+  FW.app.App.prototype.syncPanel = function () {
     $('scene').value = this.scene;
     $('seed').value = this.seed;
     $('budget').value = this.maxGeos;
-    $('dense').checked = this.denseTrails;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
     $('scene-help').textContent = SCENES[this.scene][1];
+    document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
+    this.applyUiVisibility();
     this.hud();
   };
 
-  /* -------------------------------------------------------------- 交互 */
-
-  App.prototype.togglePause = function () {
-    if (this.paused && this.freezeFrames !== null) {
-      // 从定格帧接着往下放（复刻图 → 会动的复刻版）
-      this.freezeFrames = null;
-    }
-    this.paused = !this.paused;
-    this.acc = 0.0;
-    this.syncPanel();
+  FW.app.App.prototype.applyUiVisibility = function () {
+    var hidden = this.hideUi || this.uiHidden;
+    $('panel').hidden = hidden;
+    $('hud').hidden = hidden;
+    $('show').hidden = !hidden;             // 收起后留着「≡ 控制台」按钮
   };
 
-  App.prototype.bindPanel = function () {
+  FW.app.App.prototype.toggleUi = function () {
+    this.uiHidden = !this.uiHidden;
+    this.applyUiVisibility();
+  };
+
+  /** 出错了：把信息摆到 HUD 上（canvas 里 rAF 抛的异常默认是看不见的）。 */
+  FW.app.App.prototype.onError = function (err) {
+    console.error(err);
+    this.hideUi = false;
+    this.uiHidden = false;
+    this.applyUiVisibility();
+    var st = $('hud-state');
+    st.textContent = '出错: ' + err.message;
+    st.style.color = '#ff8a8a';
+  };
+
+  /* --------------------------------------------------------------- 交互 */
+
+  FW.app.App.prototype.bindPanel = function () {
     var self = this;
     $('scene').addEventListener('change', function () { self.rebuild(this.value, null); });
     $('seed').addEventListener('change', function () {
@@ -1604,22 +1651,12 @@
       self.rebuild(null, FW.rng.defaultSeed());
     });
     $('pause').addEventListener('click', function () { self.togglePause(); });
-    $('extra').addEventListener('click', function () { self.show.spawnRandom(1); });
-    $('still').addEventListener('click', function () {
-      self.rebuild('original', self.seed);
-      self.show.step(0.0);                      // 第 1 帧 = 参考图
-      self.paused = true;
-      self.syncPanel();
-    });
+    $('extra').addEventListener('click', function () { self.extra(); });
+    $('still').addEventListener('click', function () { self.stillFrame(); });
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
-    $('hide').addEventListener('click', function () { self.toggleUi(false); });
-    $('show').addEventListener('click', function () { self.toggleUi(true); });
-    $('dense').addEventListener('change', function () {
-      // 只改画法，不动物理：运行中途开关都不会影响这一场演出
-      self.show.denseTrails = this.checked;
-      self.denseTrails = this.checked;
-    });
+    $('hide').addEventListener('click', function () { self.toggleUi(); });
+    $('show').addEventListener('click', function () { self.toggleUi(); });
     $('budget').addEventListener('input', function () {
       self.maxGeos = parseInt(this.value, 10);
       self.show.maxGeos = self.maxGeos;
@@ -1627,30 +1664,17 @@
     });
   };
 
-  App.prototype.bindKeys = function () {
+  FW.app.App.prototype.bindKeys = function () {
     var self = this;
     window.addEventListener('keydown', function (e) {
       if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
       if (e.code === 'Space') { e.preventDefault(); self.togglePause(); }
-      else if (e.key === 'r' || e.key === 'R') self.show.spawnRandom(1);
-      else if (e.key === 'Escape') self.toggleUi($('panel').hidden);
+      else if (e.key === 'r' || e.key === 'R') self.extra();
+      else if (e.key === 'Escape') self.toggleUi();
     });
   };
 
-  /** ?ui=0：面板 / HUD / ≡ 按钮全部藏掉（截图、嵌入用）。 */
-  App.prototype.hideAllUi = function () {
-    $('panel').hidden = true;
-    $('hud').hidden = true;
-    $('show').hidden = true;
-  };
-
-  App.prototype.toggleUi = function (showPanel) {
-    $('panel').hidden = !showPanel;
-    $('hud').hidden = !showPanel;
-    $('show').hidden = showPanel;
-  };
-
-  App.prototype.savePng = function () {
+  FW.app.App.prototype.savePng = function () {
     var a = document.createElement('a');
     a.download = 'fireworks_' + this.scene + '_seed' + this.seed
                + '_t' + this.show.time.toFixed(2) + '.png';
@@ -1658,7 +1682,16 @@
     a.click();
   };
 
-  function boot() { FW.app = new App(); }
+  /* --------------------------------------------------------------- 启动 */
+
+  function boot() {
+    var inst = new FW.app.App({
+      canvas: $('stage'),
+      search: new URLSearchParams(location.search)
+    });
+    FW.app.instance = inst;
+    inst.start();
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

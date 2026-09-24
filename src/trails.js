@@ -45,7 +45,6 @@
     this.cool = o.cool;
     this.fadeTime = o.fadeTime === undefined ? 3.4 : o.fadeTime;
     this.minStep = o.minStep === undefined ? 9.0 : o.minStep;
-    this.segMax = o.segMax === undefined ? 6 : o.segMax;
     this.maxPts = o.maxPts === undefined ? 80 : o.maxPts;
   }
   Trail.prototype = Object.create(Element.prototype);
@@ -76,14 +75,9 @@
     var tail = this.pts[this.pts.length - 1];
     var pts = (this.head === tail) ? this.pts : this.pts.concat([this.head]);
     if (pts.length < 2) return [];
-    var q = decimate(pts, this.segMax);                   // 原版口径（图章预算）
-    var base = this.segsFor(q);
-    // canvas 增强：整条真实飞行轨迹一次描边（原版只能盖 6 个图章）
-    if (this.show.denseTrails && pts.length > q.length) {
-      var dense = this.segsFor(decimate(pts, Math.min(pts.length - 1, DENSE.trail)));
-      if (dense.length) return [pathGeo(dense, base.length)];
-    }
-    return base.map(rayGeo);
+    // 整条真实飞行轨迹一次描边（原版受图章预算限制只能画 6 段）
+    var segs = this.segsFor(decimate(pts, Math.min(pts.length - 1, DENSE.trail)));
+    return segs.length ? [pathGeo(segs)] : [];
   };
 
   /** 把抽稀后的轨迹点连成线段：[x0, y0, x1, y1, color, half]（原版的取色/取宽公式）。 */

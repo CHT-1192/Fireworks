@@ -17,18 +17,21 @@
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
   var STYLE_NAMES = data.STYLE_NAMES, ORIGINAL = data.ORIGINAL;
   var stemSegments = FW.elements.stemSegments, FixedLine = FW.elements.FixedLine;
-  var Spark = FW.elements.Spark;
+  var Spark = FW.elements.Spark, drawnCost = data.drawnCost;
+
+  //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
+  //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
+  //: 注意节流是启发式的（只影响后续发射的火花数），所以单帧峰值会超过预算。
+  var DEFAULT_GEOS = 450;
 
   function Show(w, h, rng, o) {
     o = o || {};
     this.w = w;
     this.h = h;
     this.rng = rng;
-    // 图元预算：一帧里所有元素画出的图元总数（性能保护）
-    this.maxGeos = (o.maxGeos === undefined) ? 130 : o.maxGeos;
-    // 增强模式：尾迹沿真实轨迹细采样（只影响画法，不影响物理/随机数）。
-    // 可在运行中随时开关（读的就是这个字段）。
-    this.denseTrails = (o.denseTrails === undefined) ? true : o.denseTrails;
+    // 绘制预算：一帧里**实际**画出多少个基本图元（折线按段数算）—— 它直接对应
+    // canvas 的描边/填充开销，也是 density() 节流的依据。
+    this.maxGeos = (o.maxGeos === undefined) ? DEFAULT_GEOS : o.maxGeos;
     this.lastGeos = 0;
     this.elements = [];
     this.fireworks = [];
@@ -42,7 +45,7 @@
 
   Show.prototype.add = function (e) { this.elements.push(e); };
 
-  /** 画布快满了就少放几颗火星（烟花照放，只是稀一点）。 */
+  /** 画布快满了就少放几颗火星（烟花照放，只是稀一点）。依据是上一帧的实际图元数。 */
   Show.prototype.density = function () {
     if (this.maxGeos <= 0) return 1.0;
     var ratio = this.lastGeos / this.maxGeos;
@@ -155,14 +158,12 @@
     for (i = 0; i < els.length; i++) els[i].update(dt);
 
     // 2) 出图元。临死这帧同样要调 frame()（它可能消耗 rng），只是不画出来。
-    //    预算按 Python 口径结算：折线图元用它自己报的 cost（见 data.pathGeo）。
-    //    这是**兼容层**，只为保留原版的密度节流口径、方便与原版对拍；新特性不受它
-    //    约束 —— 真要按开销算，应该按实际描边段数（renderer.segs）重定义这个预算。
+    //    预算按实际绘制开销结算（折线按段数），所以它反映的就是这一帧要画多少东西。
     var total = 0, out = [];
     for (i = 0; i < els.length; i++) {
       var e = els[i];
       var geos = e.frame();
-      for (j = 0; j < geos.length; j++) total += (geos[j].cost === undefined ? 1 : geos[j].cost);
+      for (j = 0; j < geos.length; j++) total += drawnCost(geos[j]);
       if (e.alive) for (j = 0; j < geos.length; j++) out.push(geos[j]);
     }
     this.frameGeos = out;
@@ -194,5 +195,5 @@
     else show.spawnRandom(2);
   }
 
-  FW.show = { Show: Show, build: build };
+  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS };
 })(globalThis.FW || (globalThis.FW = {}));

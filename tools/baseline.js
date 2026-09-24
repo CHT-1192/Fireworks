@@ -7,8 +7,8 @@
  * 对拍"来定义 —— 那套对拍（tools/verify.js）退化为移植考古，只在确认移植本身
  * 有没有走样时才有意义。
  *
- * 维护版真正需要的是：**改东西时别无意中改坏别的东西**。所以这里给每个场景 ×
- * 每种渲染模式拍一份"行为指纹"存进 baseline.json：
+ * 维护版真正需要的是：**改东西时别无意中改别的东西**。所以这里给每个场景拍一份
+ * "行为指纹"存进 baseline.json：
  *
  *   每帧指纹 = sha256( MT19937 全部 624 状态字 + 图元流 + 图元预算 + 元素数 )
  *
@@ -33,20 +33,15 @@ const FILE = path.join(__dirname, 'baseline.json');
 const DT = 1 / 60;
 const W = 924;
 const H = 691;
-const MAX_GEOS = 130;
 const FRAMES = 400;
 
-/** 覆盖到的场景 × 渲染模式。seed 只对 random 有意义，但都固定下来更省事。 */
+/** 覆盖到的场景（seed 只对 random 有意义，但都固定下来更省事）。 */
 const SCENES = [
   { scene: 'classic', seed: 7 },
   { scene: 'original', seed: 7 },
   { scene: 'random', seed: 7 },
   { scene: 'random', seed: 42 },
   { scene: 'random', seed: 123456 }
-];
-const MODES = [
-  { dense: true, name: '光滑尾迹' },
-  { dense: false, name: '原版口径' }
 ];
 
 // 渲染器也要被指纹覆盖：view.js 只依赖 window（设备像素比/视口）和一个 canvas
@@ -77,9 +72,9 @@ function rngBytes(rng) {
   return buf;
 }
 
-function runCase(cs, mode) {
+function runCase(cs) {
   const rng = new FW.rng.Random(cs.seed);
-  const show = new FW.show.Show(W, H, rng, { maxGeos: MAX_GEOS, denseTrails: mode.dense });
+  const show = new FW.show.Show(W, H, rng, { maxGeos: FW.show.DEFAULT_GEOS });
   FW.show.build(show, cs.scene);
   const { canvas, ctx, problems } = makeFakeCanvas(W, H);
   const renderer = new FW.view.Renderer(canvas, 2);
@@ -91,7 +86,7 @@ function runCase(cs, mode) {
     ctx.beginFrame();
     renderer.draw(show.frameGeos);
     if (problems.length) {
-      throw new Error(`${key(cs, mode)} 第 ${i} 帧渲染参数非法: ${problems[0]}`);
+      throw new Error(`${key(cs)} 第 ${i} 帧渲染参数非法: ${problems[0]}`);
     }
     const h = crypto.createHash('sha256');
     h.update(rngBytes(rng));                          // 随机数流
@@ -105,14 +100,13 @@ function runCase(cs, mode) {
   return { sig: sig.join(''), geos: geos.join(','), els: els.join(','), segs: segs.join(',') };
 }
 
-function key(cs, mode) { return `${cs.scene}/seed=${cs.seed}/${mode.dense ? 'dense' : 'exact'}`; }
+function key(cs) { return `${cs.scene}/seed=${cs.seed}`; }
 
 function collect() {
   const out = { note: '行为基线：每帧指纹 = sha256(RNG 624 状态字 + 图元流 + 预算/元素数 + 渲染绘制指令)，取前 8 位十六进制',
-                dt: DT, width: W, height: H, maxGeos: MAX_GEOS, frames: FRAMES, cases: {} };
-  for (const cs of SCENES) {
-    for (const mode of MODES) out.cases[key(cs, mode)] = runCase(cs, mode);
-  }
+                dt: DT, width: W, height: H,
+                maxGeos: FW.show.DEFAULT_GEOS, frames: FRAMES, cases: {} };
+  for (const cs of SCENES) out.cases[key(cs)] = runCase(cs);
   return out;
 }
 
