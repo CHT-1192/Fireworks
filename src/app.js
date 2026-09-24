@@ -21,17 +21,33 @@
     random: ['纯随机', '全部程序化随机生成的一场烟花秀']
   };
 
-  /** 种子统一成大写去空格：字母码好念也好分享（KQXW 与 kqxw 是同一场）。 */
-  function normalizeSeed(s) { return String(s).trim().toUpperCase(); }
+  /**
+   * 彩蛋密语。种子框**正常只收数字**；字母必须一个字符一个字符敲对才留得下来，
+   * 所以"试探每个字母"本身就是找彩蛋的过程（敲错了那个字符根本进不去）。
+   * 想换彩蛋就改这一行 —— 提示语里的字母个数会自动跟着变。
+   */
+  var SECRET = 'TURTLE';
+
+  /** 种子框允许的内容：全数字，或者密语的正确前缀（含空串）。 */
+  function seedContentOk(text) {
+    if (/^\d*$/.test(text)) return true;
+    return text === SECRET.slice(0, text.length);
+  }
+
+  /** 外部来的种子（URL / 输入框）规整：数字原样、密语原样，其它一律不认。 */
+  function seedFromRaw(raw) {
+    var text = String(raw == null ? '' : raw).trim().toUpperCase();
+    if (/^\d+$/.test(text)) return text;
+    return text === SECRET ? text : '';
+  }
 
   /**
-   * 场景由**种子形态**决定（也是个彩蛋）：
-   *   字母种子 -> 参考图风格；数字种子 -> 纯随机秀。
+   * 场景：数字种子 -> 纯随机秀；敲对了密语 -> 参考图风格。
    * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
    */
   function sceneForSeed(seed, sceneParam) {
     if (SCENES[sceneParam]) return sceneParam;
-    return FW.rng.isNumericSeed(seed) ? 'random' : 'classic';
+    return seed === SECRET ? 'classic' : 'random';
   }
 
   /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
@@ -40,10 +56,11 @@
     this.canvas = opts.canvas;
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 不给种子就随机发一个**字母**种子 —— 于是默认开场就是参考图风格，而且
-    // HUD 与控制台里那个字母码本身就是可以分享/复现的彩蛋。
-    this.seed = normalizeSeed(q.get('seed') || '') || FW.rng.randomLetters(4);
-    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    // 种子：URL 里是数字就用它，是密语就用密语，其它（含乱敲的字母）一律不认，
+    // 退回随机数字种子。
+    var raw = seedFromRaw(q.get('seed'));
+    this.secretFound = (raw === SECRET);
+    this.seed = raw || String(FW.rng.defaultSeed());
     this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
@@ -110,8 +127,11 @@
    * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
    */
   App.prototype.rebuild = function (scene, seed) {
-    if (seed !== undefined && seed !== null) this.seed = normalizeSeed(seed);
-    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    if (seed !== undefined && seed !== null) {
+      var raw = seedFromRaw(seed);
+      this.secretFound = (raw === SECRET);
+      this.seed = raw || String(FW.rng.defaultSeed());   // 认不出来就换个数字种子
+    }
     this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
@@ -119,10 +139,8 @@
     this.syncPanel();
   };
 
-  /** 随机换一个种子：letters=true 给字母种子（参考图风格），false 给数字种子（纯随机）。 */
-  App.prototype.reseed = function (letters) {
-    this.rebuild(undefined, letters ? FW.rng.randomLetters(4) : FW.rng.defaultSeed());
-  };
+  /** 随机换一个数字种子（纯随机秀）。 */
+  App.prototype.reseed = function () { this.rebuild(undefined, FW.rng.defaultSeed()); };
 
   /* --------------------------------------------------------------- 主循环 */
 
@@ -196,5 +214,7 @@
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, sceneForSeed: sceneForSeed };
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT,
+             sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
+             seedFromRaw: seedFromRaw, SECRET: SECRET };
 })(globalThis.FW || (globalThis.FW = {}));

@@ -95,22 +95,41 @@ const hold = frozen.show.time;
 for (let i = 0; i < 30; i++) { ts += 1000 / 60; frozen.stepFrame(ts); }
 if (frozen.show.time !== hold) loopProblems.push('暂停后时间还在走');
 
-// 2.4 字母种子 -> 参考图风格；数字种子 -> 纯随机；大小写/空格归一
+// 2.4 种子规则：正常只收数字；密语 -> 参考图风格，数字 -> 纯随机
+const SECRET = FW.app.SECRET;
 const cases = [
-  ['seed=KQXW', 'classic', 'KQXW'],
-  ['seed=kqxw', 'classic', 'KQXW'],
-  ['seed=%207%20', 'random', '7'],
-  ['seed=7&scene=classic', 'classic', '7'],
-  ['scene=random&seed=KQXW', 'random', 'KQXW']
+  ['seed=7', 'random', '7'],
+  ['seed=007', 'random', '007'],
+  ['seed=%20' + SECRET.toLowerCase() + '%20', 'classic', SECRET],   // 大小写/空格归一
+  ['scene=classic&seed=7', 'classic', '7'],                         // 显式场景优先
+  ['scene=random&seed=' + SECRET, 'random', SECRET]
 ];
 for (const [q, scene, seed] of cases) {
   const a = makeApp(q);
   if (a.scene !== scene) loopProblems.push(`${q} 应该是 ${scene}，实际 ${a.scene}`);
   if (a.seed !== seed) loopProblems.push(`${q} 种子应为 ${seed}，实际 ${a.seed}`);
 }
-// 同一个字母种子必须放出同一场
-const s1 = makeApp('seed=KQXW&frames=30'), s2 = makeApp('seed=KQXW&frames=30');
-if (s1.show.lastGeos !== s2.show.lastGeos) loopProblems.push('字母种子不可复现');
+// 乱敲的字母一律不认，退回随机数字种子（纯随机秀）
+const bogus = makeApp('seed=KQXW');
+if (bogus.scene !== 'random') loopProblems.push('乱敲的字母种子应当退回纯随机秀');
+if (!/^\d+$/.test(bogus.seed)) loopProblems.push(`乱敲的字母种子应退回数字，实际 ${bogus.seed}`);
+
+// 逐字符守卫（种子框只允许"数字"或"密语的正确前缀"）—— 彩蛋就靠它做反馈
+const wrongFirst = (SECRET[0] === 'Q') ? 'Z' : 'Q';
+const wrongMid = SECRET.slice(0, 1) + ((SECRET[1] === 'X') ? 'Y' : 'X');
+const okTexts = ['', '0', '2024'];
+for (let i = 0; i <= SECRET.length; i++) okTexts.push(SECRET.slice(0, i));
+const badTexts = [wrongFirst, wrongMid, SECRET + 'A', 'T5', '1T', SECRET.slice(0, 2) + '5'];
+for (const s of okTexts) {
+  if (!FW.app.seedContentOk(s)) loopProblems.push(`种子框本该接受「${s}」`);
+}
+for (const s of badTexts) {
+  if (FW.app.seedContentOk(s)) loopProblems.push(`种子框本该拒绝「${s}」`);
+}
+
+// 同一个密语必须放出同一场
+const c1 = makeApp('seed=' + SECRET + '&frames=30'), c2 = makeApp('seed=' + SECRET + '&frames=30');
+if (c1.show.lastGeos !== c2.show.lastGeos) loopProblems.push('密语种子不可复现');
 
 // 2.5 渲染器抛异常要被 tick 兜住（onError），而不是把主循环打断
 const boom = makeApp('scene=classic&seed=7&frames=10&w=924&h=691');
@@ -127,7 +146,7 @@ if (loopProblems.length) {
   for (const p of loopProblems) console.log('  ✗ ' + p);
 } else {
   console.log(`  OK   定格 (N-1)/60 秒、60 帧推进 ${advanced.toFixed(3)}s、暂停不走、异常被兜住`);
-  console.log(`  OK   字母种子→参考图风格、数字种子→纯随机、大小写归一、同种子可复现`);
+  console.log(`  OK   数字种子→纯随机、密语→参考图风格、逐字符守卫 ${okTexts.length} 收 / ${badTexts.length} 拒、可复现`);
 }
 console.log('─'.repeat(76));
 for (const p of loopProblems) problems.push(p);

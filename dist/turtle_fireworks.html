@@ -51,7 +51,12 @@
   #seed {
     flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
+    transition: border-color .15s;
   }
+  /* 敲错字母时抖一下：这就是"试探"的反馈 */
+  @keyframes seed-reject { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); }
+                           70% { transform: translateX(4px); } }
+  #seed.reject { animation: seed-reject .22s; border-color: rgba(255, 138, 138, .85); }
   button { cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
   button:hover { background: rgba(140, 170, 255, .2); border-color: rgba(160, 190, 255, .5); }
   button:active { transform: translateY(1px); }
@@ -90,8 +95,7 @@
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
   </label>
   <div class="row">
-    <button id="dice-letters" title="随机字母种子 —— 开场是参考图风格">字母种子</button>
-    <button id="dice-number" title="随机数字种子 —— 纯随机秀">数字种子</button>
+    <button id="dice-number" title="随机换一个数字种子">随机种子</button>
   </div>
   <p id="scene-help" class="help"></p>
 
@@ -114,10 +118,11 @@
 
   <p class="hint">
     空格 暂停 / 继续 · R 放一发 · Esc 收起面板<br>
-    <b>字母种子</b> → 参考图风格那一发，<b>数字种子</b> → 纯随机秀；<br>
-    同一个种子每次都是同一场（固定 1/60 步长）。控制台里还有个小彩蛋。<br>
-    URL：<code>?seed=KQXW</code>、<code>?scene=random&amp;seed=7</code>、
-    <code>?frames=90</code>（定格）、<code>?ui=0</code>（无 UI）、<code>?max=200</code><br>
+    种子框<span title="试试往里面敲字母">只收数字</span>；同一个种子每次都是同一场
+    （固定 1/60 步长推进）。<br>
+    至于参考图风格…… <b>控制台里有个小彩蛋</b>，照着它试。<br>
+    URL：<code>?seed=7</code>、<code>?frames=90</code>（定格）、<code>?ui=0</code>（无 UI）、
+    <code>?max=200</code><br>
     「图元上限」按实际绘制开销算（折线按段数），画不动就往下调。
   </p>
 </aside>
@@ -308,21 +313,6 @@ setTimeout(function () {
     return h;
   }
 
-  var CODE_C = 'BCDFGHJKLMNPQRSTVWXZ';             // 声母
-  var CODE_V = 'AEIOU';                            // 韵母：拼出来像个词，好记好念
-
-  /**
-   * 生成一个 n 位字母种子码（彩蛋用）。刻意用 Math.random 而**不是**演出用的 RNG ——
-   * 否则光是生成提示就会打乱"同 seed = 同一场"。
-   */
-  function randomLetters(n) {
-    var out = '';
-    for (var i = 0; i < n; i++) {
-      var pool = (i % 2 === 0) ? CODE_C : CODE_V;
-      out += pool.charAt(Math.floor(Math.random() * pool.length));
-    }
-    return out;
-  }
 
   function bitLength(n) {
     var k = 0;
@@ -440,7 +430,7 @@ setTimeout(function () {
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed, randomLetters: randomLetters,
+  FW.rng = { Random: Random, defaultSeed: defaultSeed,
              isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));
 
@@ -1280,17 +1270,33 @@ setTimeout(function () {
     random: ['纯随机', '全部程序化随机生成的一场烟花秀']
   };
 
-  /** 种子统一成大写去空格：字母码好念也好分享（KQXW 与 kqxw 是同一场）。 */
-  function normalizeSeed(s) { return String(s).trim().toUpperCase(); }
+  /**
+   * 彩蛋密语。种子框**正常只收数字**；字母必须一个字符一个字符敲对才留得下来，
+   * 所以"试探每个字母"本身就是找彩蛋的过程（敲错了那个字符根本进不去）。
+   * 想换彩蛋就改这一行 —— 提示语里的字母个数会自动跟着变。
+   */
+  var SECRET = 'TURTLE';
+
+  /** 种子框允许的内容：全数字，或者密语的正确前缀（含空串）。 */
+  function seedContentOk(text) {
+    if (/^\d*$/.test(text)) return true;
+    return text === SECRET.slice(0, text.length);
+  }
+
+  /** 外部来的种子（URL / 输入框）规整：数字原样、密语原样，其它一律不认。 */
+  function seedFromRaw(raw) {
+    var text = String(raw == null ? '' : raw).trim().toUpperCase();
+    if (/^\d+$/.test(text)) return text;
+    return text === SECRET ? text : '';
+  }
 
   /**
-   * 场景由**种子形态**决定（也是个彩蛋）：
-   *   字母种子 -> 参考图风格；数字种子 -> 纯随机秀。
+   * 场景：数字种子 -> 纯随机秀；敲对了密语 -> 参考图风格。
    * ?scene= 显式指定时以它为准，方便分享链接里锁死场景。
    */
   function sceneForSeed(seed, sceneParam) {
     if (SCENES[sceneParam]) return sceneParam;
-    return FW.rng.isNumericSeed(seed) ? 'random' : 'classic';
+    return seed === SECRET ? 'classic' : 'random';
   }
 
   /** opts = { canvas, search: URLSearchParams }。构造完不会自己开跑，需 start()。 */
@@ -1299,10 +1305,11 @@ setTimeout(function () {
     this.canvas = opts.canvas;
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
-    // 不给种子就随机发一个**字母**种子 —— 于是默认开场就是参考图风格，而且
-    // HUD 与控制台里那个字母码本身就是可以分享/复现的彩蛋。
-    this.seed = normalizeSeed(q.get('seed') || '') || FW.rng.randomLetters(4);
-    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    // 种子：URL 里是数字就用它，是密语就用密语，其它（含乱敲的字母）一律不认，
+    // 退回随机数字种子。
+    var raw = seedFromRaw(q.get('seed'));
+    this.secretFound = (raw === SECRET);
+    this.seed = raw || String(FW.rng.defaultSeed());
     this.scene = sceneForSeed(this.seed, q.get('scene'));
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
@@ -1369,8 +1376,11 @@ setTimeout(function () {
    * scene 传 null/undefined = 按种子形态重新推断（字母 -> 参考图风格，数字 -> 纯随机）。
    */
   App.prototype.rebuild = function (scene, seed) {
-    if (seed !== undefined && seed !== null) this.seed = normalizeSeed(seed);
-    this.letterSeed = !FW.rng.isNumericSeed(this.seed);
+    if (seed !== undefined && seed !== null) {
+      var raw = seedFromRaw(seed);
+      this.secretFound = (raw === SECRET);
+      this.seed = raw || String(FW.rng.defaultSeed());   // 认不出来就换个数字种子
+    }
     this.scene = sceneForSeed(this.seed, scene);
     this.freezeFrames = null;
     this.paused = false;
@@ -1378,10 +1388,8 @@ setTimeout(function () {
     this.syncPanel();
   };
 
-  /** 随机换一个种子：letters=true 给字母种子（参考图风格），false 给数字种子（纯随机）。 */
-  App.prototype.reseed = function (letters) {
-    this.rebuild(undefined, letters ? FW.rng.randomLetters(4) : FW.rng.defaultSeed());
-  };
+  /** 随机换一个数字种子（纯随机秀）。 */
+  App.prototype.reseed = function () { this.rebuild(undefined, FW.rng.defaultSeed()); };
 
   /* --------------------------------------------------------------- 主循环 */
 
@@ -1455,7 +1463,9 @@ setTimeout(function () {
 
   App.prototype.extra = function () { this.show.spawnRandom(1); };
 
-  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT, sceneForSeed: sceneForSeed };
+  FW.app = { App: App, SCENES: SCENES, FIXED_DT: FIXED_DT,
+             sceneForSeed: sceneForSeed, seedContentOk: seedContentOk,
+             seedFromRaw: seedFromRaw, SECRET: SECRET };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/ui.js ===================== */
@@ -1500,7 +1510,9 @@ setTimeout(function () {
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
     $('scene-help').textContent = SCENES[this.scene][1]
-      + '（' + (this.letterSeed ? '字母种子' : '数字种子') + ' → ' + SCENES[this.scene][0] + '）';
+      + (this.secretFound
+         ? '　🎉 密语已解锁'
+         : '　（种子只收数字；另有一串字母是彩蛋）');
     document.title = '烟花 · seed ' + this.seed + ' · ' + this.scene;
     this.applyUiVisibility();
     this.hud();
@@ -1531,14 +1543,51 @@ setTimeout(function () {
 
   /* --------------------------------------------------------------- 交互 */
 
+  /**
+   * 种子框的"逐字符"守卫：正常只收数字；字母只有当它正好接上密语时才留得下来，
+   * 敲错了就当场退回上一个合法内容并抖一下 —— 所以"试探每个字母"是有反馈的，
+   * 找彩蛋就是这么一个字母一个字母试出来的。粘贴也走同一条校验。
+   */
+  FW.app.App.prototype.bindSeedInput = function () {
+    var self = this;
+    var input = $('seed');
+    var lastValid = this.seed;
+    input.value = lastValid;
+
+    input.addEventListener('input', function () {
+      var text = this.value.toUpperCase();
+      if (!FW.app.seedContentOk(text)) {          // 不是数字、也不是密语的前缀
+        this.value = lastValid;
+        this.classList.remove('reject');
+        void this.offsetWidth;                    // 强制重排，动画才会重播
+        this.classList.add('reject');
+        clearTimeout(self.rejectTimer);
+        self.rejectTimer = setTimeout(function () { input.classList.remove('reject'); }, 240);
+        return;
+      }
+      lastValid = text;
+      this.value = text;
+      if (text === FW.app.SECRET) {               // 敲全了：立刻解锁参考图风格
+        self.rebuild(undefined, text);
+        console.log('%c🎉 彩蛋找到了：' + FW.app.SECRET + ' —— 参考图风格已解锁',
+                    'color:#ffd34d;font-weight:700');
+      }
+    });
+
+    // 聚焦就全选：想换种子直接敲，不用先手动删掉旧的
+    input.addEventListener('focus', function () { this.select(); });
+
+    // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
+    input.addEventListener('change', function () {
+      if (/^\d+$/.test(this.value)) self.rebuild(undefined, this.value);
+      else if (this.value === '') self.reseed();
+    });
+  };
+
   FW.app.App.prototype.bindPanel = function () {
     var self = this;
-    // 种子改成"能打字母"：字母 -> 参考图风格，数字 -> 纯随机（场景由种子形态决定）
-    $('seed').addEventListener('change', function () {
-      self.rebuild(undefined, this.value || FW.rng.randomLetters(4));
-    });
-    $('dice-letters').addEventListener('click', function () { self.reseed(true); });
-    $('dice-number').addEventListener('click', function () { self.reseed(false); });
+    this.bindSeedInput();
+    $('dice-number').addEventListener('click', function () { self.reseed(); });
     $('pause').addEventListener('click', function () { self.togglePause(); });
     $('extra').addEventListener('click', function () { self.extra(); });
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
@@ -1573,20 +1622,24 @@ setTimeout(function () {
   /* --------------------------------------------------------------- 启动 */
 
   /**
-   * 控制台彩蛋：把规则和当前种子打出来。数字种子时再随机发一个字母种子当提示
-   * （用 Math.random，不碰演出用的 RNG）。已经用字母种子的就不再剧透。
+   * 控制台彩蛋的引子：说清"种子只收数字"，并给一个**不解谜**的提示（只报字母个数，
+   * 不报内容）—— 剩下的靠往种子框里一个字母一个字母试。
    */
   function consoleEgg(app) {
     var gold = 'color:#ffd34d;font-weight:600';
     var cyan = 'color:#7fd1ff;font-weight:600';
     console.log('%c烟花 · Canvas 维护版', gold);
-    console.log('本场 seed: %c' + app.seed + '%c  （' + (app.letterSeed
-      ? '字母种子 → 参考图风格'
-      : '数字种子 → 纯随机秀') + '）', cyan, 'color:inherit');
-    if (!app.letterSeed) {
-      console.log('彩蛋：种子换成字母，开场就是参考图风格那一发 —— 试试 %c?seed='
-        + FW.rng.randomLetters(4), gold);
+    console.log('本场 seed: %c' + app.seed + '%c  （数字种子 → 纯随机秀）',
+                cyan, 'color:inherit');
+    if (app.secretFound) {
+      console.log('%c彩蛋已解锁：参考图风格', gold);
+      return;
     }
+    console.log('彩蛋：种子框正常只收数字。不过有一串 %c' + FW.app.SECRET.length
+      + ' 个字母%c的词能打开参考图风格。',
+      'color:#ffd34d', 'color:inherit');
+    console.log('　往种子里一个字母一个字母地敲：%c敲对了会留下来，敲错了会被弹回来%c。'
+      + '（提示：这一版的原版，是拿它画的）', 'color:#9ad', 'color:inherit');
   }
 
   function boot() {

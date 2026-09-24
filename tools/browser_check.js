@@ -45,9 +45,10 @@ const BROWSERS = [
 const DIST_CASES = [
   // 第 1 帧（still=1）只有两枚上升中的弹体、尾迹还没成形，所以只要求"画了东西"
   { name: 'classic 第1帧', q: 'scene=classic&seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
-  // 彩蛋规则：字母种子 -> 参考图风格，数字种子 -> 纯随机（两条都验）
-  { name: '字母种子→参考图风格', q: 'seed=KQXW&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
+  // 彩蛋规则：数字种子 -> 纯随机秀；敲对密语 -> 参考图风格；乱敲的字母 -> 不认
   { name: '数字种子→纯随机', q: 'seed=7&still=1&w=924&h=691', time: 0, segs: false, scene: 'random' },
+  { name: '密语→参考图风格', q: 'seed=TURTLE&still=1&w=924&h=691', time: 0, segs: false, scene: 'classic' },
+  { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1&w=924&h=691', time: 0, segs: false, scene: 'random' },
   { name: 'classic 第150帧', q: 'scene=classic&seed=7&frames=150&w=924&h=691', time: 149 * DT, segs: true },
   { name: 'random 第150帧', q: 'scene=random&seed=42&frames=150&w=924&h=691', time: 149 * DT, segs: true },
   { name: 'random 第150帧(无UI)', q: 'scene=random&seed=42&frames=150&w=924&h=691&ui=0', time: 149 * DT, segs: true, uiHidden: true }
@@ -76,7 +77,8 @@ async function httpText(url) {
  * 同时用 --enable-logging=stderr 把页面 console 的输出捞回来 —— 彩蛋打的就是控制台，
  * 不然没法自动验。返回 { html, log }。
  */
-function dumpDom(bin, url) {
+function dumpDom(bin, url, waitFor) {
+  const ready = waitFor || /id="hud-state"/;
   return new Promise((resolve, reject) => {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'fwcheck-'));
     const p = spawn(bin, ['--headless=new', '--no-sandbox', '--disable-gpu-sandbox',
@@ -90,16 +92,31 @@ function dumpDom(bin, url) {
       done = true;
       clearInterval(poll); clearTimeout(guard);
       try { p.kill('SIGKILL'); } catch (e) { /* 已经退出了 */ }
-      fs.rmSync(profile, { recursive: true, force: true });
+      // 刚 SIGKILL 掉，Chromium 的子进程可能还在写 profile —— 清理失败不该让自检挂掉
+      try {
+        fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      } catch (e) { /* 留在系统临时目录里也无妨 */ }
       resolve({ html: out, log });
     };
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { log += d; });
-    const poll = setInterval(() => { if (/id="hud-state"/.test(out)) finish(); }, 300);
+    const poll = setInterval(() => { if (ready.test(out)) finish(); }, 300);
     const guard = setTimeout(finish, 45000);
     p.on('close', finish);
     p.on('error', reject);
   });
+}
+
+/** 从 src/app.js 里读彩蛋密语（测试需要知道它，但不该把它硬编码在这儿）。 */
+function readSecret() {
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
+  const m = src.match(/var SECRET = '([^']+)'/);
+  if (!m) throw new Error('src/app.js 里找不到 SECRET');
+  return m[1];
+}
+
+function consoleLines(log) {
+  return log.split('\n').filter((l) => /CONSOLE/.test(l)).join('\n        ');
 }
 
 function hud(html, id) {
@@ -215,20 +232,28 @@ async function checkDev(bin) {
     bad += r.problems.length;
     report('开发页出画面', r);
 
-    // B3) 控制台彩蛋：数字种子应提示"换成字母种子"，字母种子则不再剧透
+    // B3) 控制台彩蛋：只给"有几个字母"的提示，**不能**泄露密语本身
+    const SECRET = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) && readSecret();
     const num = await dumpDom(bin, BASE + '/?seed=7&frames=30&w=924&h=691');
-    const numOk = /本场 seed:/.test(num.log) && /数字种子/.test(num.log)
-      && /彩蛋/.test(num.log) && /\?seed=[A-Z]{4}/.test(num.log);
+    const numOk = /彩蛋/.test(num.log) && new RegExp(SECRET.length + ' 个字母').test(num.log)
+      && !num.log.includes(SECRET);
     bad += numOk ? 0 : 1;
     line(numOk, '控制台彩蛋(数字种子)',
-         numOk ? '打出了当前种子 + 换成字母种子的提示' : '没打出预期的提示，见下方日志');
-    if (!numOk) console.log('        ' + num.log.split('\n').filter((l) => /CONSOLE/.test(l)).join('\n        '));
+         numOk ? `给了"${SECRET.length} 个字母"的提示、没泄露密语` : '提示不符合预期或泄露了密语');
+    if (!numOk) console.log('        ' + consoleLines(num.log));
 
-    const let_ = await dumpDom(bin, BASE + '/?seed=KQXW&frames=30&w=924&h=691');
-    const letOk = /字母种子/.test(let_.log) && !/彩蛋/.test(let_.log);
-    bad += letOk ? 0 : 1;
-    line(letOk, '控制台彩蛋(字母种子)',
-         letOk ? '认出字母种子、且不再剧透' : '提示不符合预期');
+    // B4) 逐字符守卫：在真浏览器里一个字母一个字母敲（夹具页驱动，不用 CDP）
+    const probe = await dumpDom(bin, BASE + '/tools/typing_probe.html', /probe-(ok|fail)/);
+    const m = probe.html.match(/id="probe">(probe-(?:ok|fail)\s*[\s\S]*?)<\/pre>/);
+    const okTyping = !!m && m[1].indexOf('probe-ok') === 0;
+    bad += okTyping ? 0 : 1;
+    if (okTyping) {
+      const detail = JSON.parse(m[1].replace(/^probe-ok\s*/, ''));
+      line(true, '逐字符敲密语', detail.steps.join('；'));
+    } else {
+      line(false, '逐字符敲密语',
+           m ? JSON.parse(m[1].replace(/^probe-fail\s*/, '')).problems.join('；') : '夹具页没给出结果');
+    }
   } finally {
     if (proc) { try { proc.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
   }

@@ -46,7 +46,12 @@
   #seed {
     flex: 1; width: auto; text-align: center; letter-spacing: 2px; font-weight: 600;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase;
+    transition: border-color .15s;
   }
+  /* 敲错字母时抖一下：这就是"试探"的反馈 */
+  @keyframes seed-reject { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); }
+                           70% { transform: translateX(4px); } }
+  #seed.reject { animation: seed-reject .22s; border-color: rgba(255, 138, 138, .85); }
   button { cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; }
   button:hover { background: rgba(140, 170, 255, .2); border-color: rgba(160, 190, 255, .5); }
   button:active { transform: translateY(1px); }
@@ -85,8 +90,7 @@
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
   </label>
   <div class="row">
-    <button id="dice-letters" title="随机字母种子 —— 开场是参考图风格">字母种子</button>
-    <button id="dice-number" title="随机数字种子 —— 纯随机秀">数字种子</button>
+    <button id="dice-number" title="随机换一个数字种子">随机种子</button>
   </div>
   <p id="scene-help" class="help"></p>
 
@@ -109,10 +113,11 @@
 
   <p class="hint">
     空格 暂停 / 继续 · R 放一发 · Esc 收起面板<br>
-    <b>字母种子</b> → 参考图风格那一发，<b>数字种子</b> → 纯随机秀；<br>
-    同一个种子每次都是同一场（固定 1/60 步长）。控制台里还有个小彩蛋。<br>
-    URL：<code>?seed=KQXW</code>、<code>?scene=random&amp;seed=7</code>、
-    <code>?frames=90</code>（定格）、<code>?ui=0</code>（无 UI）、<code>?max=200</code><br>
+    种子框<span title="试试往里面敲字母">只收数字</span>；同一个种子每次都是同一场
+    （固定 1/60 步长推进）。<br>
+    至于参考图风格…… <b>控制台里有个小彩蛋</b>，照着它试。<br>
+    URL：<code>?seed=7</code>、<code>?frames=90</code>（定格）、<code>?ui=0</code>（无 UI）、
+    <code>?max=200</code><br>
     「图元上限」按实际绘制开销算（折线按段数），画不动就往下调。
   </p>
 </aside>

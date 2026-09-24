@@ -46,21 +46,6 @@
     return h;
   }
 
-  var CODE_C = 'BCDFGHJKLMNPQRSTVWXZ';             // 声母
-  var CODE_V = 'AEIOU';                            // 韵母：拼出来像个词，好记好念
-
-  /**
-   * 生成一个 n 位字母种子码（彩蛋用）。刻意用 Math.random 而**不是**演出用的 RNG ——
-   * 否则光是生成提示就会打乱"同 seed = 同一场"。
-   */
-  function randomLetters(n) {
-    var out = '';
-    for (var i = 0; i < n; i++) {
-      var pool = (i % 2 === 0) ? CODE_C : CODE_V;
-      out += pool.charAt(Math.floor(Math.random() * pool.length));
-    }
-    return out;
-  }
 
   function bitLength(n) {
     var k = 0;
@@ -178,6 +163,6 @@
 
   Random.prototype.choice = function (seq) { return seq[this.randbelow(seq.length)]; };
 
-  FW.rng = { Random: Random, defaultSeed: defaultSeed, randomLetters: randomLetters,
+  FW.rng = { Random: Random, defaultSeed: defaultSeed,
              isNumericSeed: isNumericSeed, hashSeed: hashSeed };
 })(globalThis.FW || (globalThis.FW = {}));
