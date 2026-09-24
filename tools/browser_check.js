@@ -13,6 +13,8 @@
  *      ② 控制台便条只提字母个数、不写出那个词；
  *      ③ 真键盘逐字符拼那个词（敲对留下、敲错弹回）；
  *      ④ 快捷键：滑块聚焦时 R 要能放，种子框打字时 R 不放，回车收焦点，Esc 随时有效。
+ *   C) 录制：真按「录制」-> 面板收起 -> 停止 -> 下载的 WebM 能被 ffprobe 读到
+ *      SEED 元数据、能被浏览器解码、文件名带种子（没有 ffprobe 就跳过元数据那一步）。
  *
  * 缺 playwright-core 或浏览器时：A 跳过、B 的列表比对仍然要跑。
  * 用法：node tools/browser_check.js      （npm i 一次；CHROME= 可指定浏览器）
@@ -20,7 +22,9 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { execFileSync, spawnSync } = require('child_process');
 const pw = require('./pw');
 
 const DIST = path.join(pw.ROOT, 'dist', 'turtle_fireworks.html');
@@ -253,6 +257,82 @@ async function checkDev(browser) {
   return bad;
 }
 
+/* ---------------------------------------------------------------- C) 录制 */
+
+function hasFfprobe() {
+  try { return spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status === 0; }
+  catch (e) { return false; }
+}
+
+async function checkRecord(browser) {
+  console.log('\nC) 录制：按「录制」-> 面板收起 -> 停止 -> 检查下载的 WebM');
+  if (!browser) {
+    console.log('  跳过：没有浏览器');
+    return 0;
+  }
+  let bad = 0;
+  const problems = [];
+  const steps = [];
+  const { page } = await pw.openPage(browser, BASE + '/?seed=7&max=900');
+
+  await page.click('#record');
+  await page.waitForTimeout(250);
+  const panelHidden = await page.isHidden('#panel');
+  const pillShown = !(await page.isHidden('#rec'));
+  if (!panelHidden) problems.push('录制时面板没收起');
+  if (!pillShown) problems.push('录制时没有停止条');
+  steps.push(`录制中：面板收起 ${panelHidden}、停止条 ${pillShown}`);
+
+  await page.waitForTimeout(1800);
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.click('#rec-stop')
+  ]);
+  const file = path.join(os.tmpdir(), 'fw-record-check.webm');
+  await dl.saveAs(file);
+  const name = dl.suggestedFilename();
+  const back = !(await page.isHidden('#panel')) && (await page.isHidden('#rec'));
+  if (!back) problems.push('停止后面板/停止条没有恢复');
+  if (name.indexOf('seed7') < 0) problems.push('文件名里没有种子：' + name);
+  steps.push(`下载 ${name}（${Math.round(fs.statSync(file).size / 1024)} KB）`);
+
+  if (hasFfprobe()) {
+    const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries',
+      'format_tags:format=duration', '-of', 'json', file], { encoding: 'utf8' }));
+    const tags = (j.format && j.format.tags) || {};
+    if (tags.SEED !== '7') problems.push('元数据里没有 SEED=7：' + JSON.stringify(tags));
+    steps.push(`ffprobe 读到 SEED=${tags.SEED}，时长 ${j.format.duration}s`);
+  } else {
+    steps.push('（没有 ffprobe，跳过元数据检查）');
+  }
+
+  const dec = await page.evaluate(async (b64) => {
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const v = document.createElement('video');
+    v.src = URL.createObjectURL(new Blob([u8], { type: 'video/webm' }));
+    try {
+      await new Promise((res, rej) => {
+        v.onloadedmetadata = res;
+        v.onerror = () => rej(new Error('decode error'));
+        setTimeout(() => rej(new Error('timeout')), 8000);
+      });
+      return { ok: true, w: v.videoWidth, h: v.videoHeight };
+    } catch (e) { return { ok: false, err: e.message }; }
+  }, fs.readFileSync(file).toString('base64'));
+  if (!dec.ok) problems.push('浏览器解不开录出来的文件：' + dec.err);
+  else if (!dec.w) problems.push('解码后没有画面尺寸');
+  else steps.push(`浏览器解码 ${dec.w}×${dec.h}`);
+  try { fs.rmSync(file, { force: true }); } catch (e) { /* 无所谓 */ }
+
+  await page.close();
+  bad += problems.length;
+  line(problems.length === 0, '录制导出', steps.join('；')
+    + (problems.length ? '\n        ' + problems.join('\n        ') : ''));
+  return bad;
+}
+
 async function main() {
   const why = pw.whyUnavailable();
   if (why) console.log('（' + why + '）');
@@ -263,6 +343,7 @@ async function main() {
   try {
     bad += await checkDist(browser);
     bad += await checkDev(browser);
+    bad += await checkRecord(browser);
   } finally {
     if (browser) await browser.close();
   }

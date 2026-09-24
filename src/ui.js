@@ -58,6 +58,62 @@
     this.applyUiVisibility();
   };
 
+  /* ---------------------------------------------------------------- 录制 */
+
+  /** 录 / 停。录制期间收起面板 —— captureStream 只抓 canvas，面板本来就不在画面里，
+   *  收起来只是让你看着干净；停止条是 DOM 浮层，也不会进画面。 */
+  FW.app.App.prototype.toggleRecord = function () {
+    if (this.recorder && this.recorder.recording()) this.stopRecord();
+    else this.startRecord();
+  };
+
+  FW.app.App.prototype.startRecord = function () {
+    if (!FW.record.supported()) {
+      console.warn('这个浏览器没有 MediaRecorder / captureStream，录不了。');
+      return;
+    }
+    if (!this.recorder) {
+      this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
+    }
+    if (!this.recorder.start()) return;
+    var self = this;
+    this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
+    this.recUiWasHidden = this.hideUi;
+    this.hideUi = true;
+    this.applyUiVisibility();
+    $('rec').hidden = false;
+    $('record').textContent = '停止录制';
+    this.recTimer = setInterval(function () {
+      $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
+    }, 100);
+    console.log('开始录制（只录画布，不含界面）');
+  };
+
+  FW.app.App.prototype.stopRecord = function () {
+    if (!this.recorder || !this.recorder.recording()) return;
+    var self = this;
+    clearInterval(this.recTimer);
+    this.recTimer = null;
+    var secs = this.recorder.elapsed();
+    $('rec').hidden = true;
+    $('record').textContent = '录制';
+    this.hideUi = this.recUiWasHidden;      // 恢复录制前的界面状态
+    this.applyUiVisibility();
+    // 元数据写种子（WebM 没有官方口子，见 src/record.js 的 EBML 处理）
+    this.recorder.stop([['SEED', this.seed]]).then(function (blob) {
+      if (!blob) return;
+      var name = 'fireworks_' + self.scene + '_seed' + self.seed + '_'
+               + secs.toFixed(0) + 's.webm';
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+      console.log('录了 ' + secs.toFixed(1) + ' 秒 -> ' + name
+        + '（' + Math.round(blob.size / 1024) + ' KB，元数据里写了 seed）');
+    });
+  };
+
   /** 出错了：把信息摆到 HUD 上（canvas 里 rAF 抛的异常默认是看不见的）。 */
   FW.app.App.prototype.onError = function (err) {
     console.error(err);
@@ -125,6 +181,8 @@
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
+    $('record').addEventListener('click', function () { self.toggleRecord(); });
+    $('rec-stop').addEventListener('click', function () { self.stopRecord(); });
     // 点一下画面 = 我看完了：把焦点从种子框收回，R 之类立刻恢复
     this.canvas.addEventListener('pointerdown', function () {
       var el = document.activeElement;
@@ -141,8 +199,12 @@
   FW.app.App.prototype.bindKeys = function () {
     var self = this;
     window.addEventListener('keydown', function (e) {
-      // Esc 永远有效（它不会往输入框里塞字符）
-      if (e.key === 'Escape') { self.toggleUi(); return; }
+      // Esc 永远有效（它不会往输入框里塞字符）；录制中先停录制
+      if (e.key === 'Escape') {
+        if (self.recorder && self.recorder.recording()) self.stopRecord();
+        else self.toggleUi();
+        return;
+      }
       // 只有"真的在往里打字"的控件才让出快捷键。原来是 input/select/textarea 一概
       // 让位 —— 而「绘制预算」滑块本身就是 <input>，拖完滑块再按 R 会毫无反应。
       var el = e.target || {};

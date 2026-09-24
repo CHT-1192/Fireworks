@@ -11,6 +11,7 @@
     "show.js",
     "view.js",
     "app.js",
+    "record.js",
     "ui.js"
   ]
 }
