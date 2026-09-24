@@ -23,6 +23,10 @@
     "smoke": "node tools/render_smoke.js",
     "browser": "node tools/browser_check.js",
     "rng": "node tools/rng_check.js",
-    "verify": "node build.js --check && node tools/render_smoke.js && node tools/baseline.js"
+    "verify": "node build.js --check && node tools/render_smoke.js && node tools/baseline.js",
+    "shot": "node tools/shot.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
   }
 }

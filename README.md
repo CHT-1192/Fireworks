@@ -7,7 +7,10 @@ turtle 限制（没有带粗细的折线图元，只能靠图章预算硬凑）�
 新特性都加在这里。
 
 ![界面](docs/preview/ui.png)
-![尾迹](docs/preview/trails-compare.png)
+
+（门面那张是"按住 R 打满"的样子，用
+`npm run shot -- --url "?seed=7&frames=1&max=1500" --spam 16 --step 200` 截的：先冻住、
+真键盘按 16 次 R、再同步推 200 帧。画面逐像素可复现，只有 HUD 里的 fps 读数会变。）
 
 ## 快速开始
 
@@ -15,14 +18,15 @@ turtle 限制（没有带粗细的折线图元，只能靠图章预算硬凑）�
 npm start          # 零依赖 Node 服务器，打开 http://127.0.0.1:9240/
 npm run build      # 单文件版 dist/turtle_fireworks.html（双击就能放）
 npm run verify     # 体检 + 自检 + 行为基线（日常就这一条）
-```
 
-不需要 `npm install`，只用 Node 内置模块。
+npm i              # 只有"浏览器级自检 / 截图"才需要：playwright-core
+npm run browser    # 真浏览器端到端自检（Playwright 驱动**系统已装的** Chromium）
+```
 
 | 形态 | 命令 | 产物 |
 | --- | --- | --- |
 | 开发 | `npm start` | `index.html` + `src/*.js` 十个模块，按 `src/manifest.json` 顺序注入（manifest 每次请求都重读，不用重启）。端口 9240，`--port` 可改 |
-| 交付 | `npm run build` | 一个自包含 HTML：**68.8 KB（gzip 23.2 KB）**，零外部请求，`file://` 直接跑。构建后自检"自包含 / 无外部脚本 / 模块齐全"；产物可复现（不含时间戳，`--stamp` 才写） |
+| 交付 | `npm run build` | 一个自包含 HTML：**70.1 KB（gzip 23.8 KB）**，零外部请求，`file://` 直接跑。构建后自检"自包含 / 无外部脚本 / 模块齐全"；产物可复现（不含时间戳，`--stamp` 才写） |
 
 ## 种子
 
@@ -46,10 +50,27 @@ npm run verify     # 体检 + 自检 + 行为基线（日常就这一条）
 
 ![光滑尾迹 vs 原版折线](docs/preview/trails-compare.png)
 
+（上：现在的圆头描边；下：当年 turtle 口径的 2~6 段折线。同一 seed 同一帧，火花圆点位置
+完全一致 —— 这张对比图是当年切换画法时留下的。）
+
 图元只剩两种：**圆点**（正 18 边形，turtle 那份形状表）和**折线**。
 
-**每帧绘制预算**按实际开销算（折线按段数、圆点各算 1），默认 450。节流是启发式的，只影响后续
-发射的火花数，所以单帧峰值会超过预算 —— 实测 400 帧内 334~789。画不动就往下调滑块。
+### 绘制预算
+
+每帧的绘制预算按**实际开销**算：折线按段数、圆点各算 1，默认 450（面板上的「绘制预算」）。
+
+预算是**画面容量**，不是硬上限 —— 空着就多发、每发更大，满了就少发、每发更小（同时作用于
+"每发多少颗"和"多久放一发"）：
+
+| 预算 | 图元均值 | 图元峰值 |
+| --- | --- | --- |
+| 450（默认） | 68 | 206 |
+| 900 | 113 | 286 |
+| 1400 | 173 | 567 |
+
+（random 场景 60 秒实测；表里是画面上真正的图元对象数。）节流是启发式的，单帧峰值会超过
+预算（实测约为预算的 1.2~2 倍，齐射是瞬时的），HUD 里的「预算」一行就是 `上一帧 / 上限`，
+看得出来滑块在起什么作用。画不动就往下调。
 
 ## 三层校验
 
@@ -58,8 +79,8 @@ npm run verify     # 体检 + 自检 + 行为基线（日常就这一条）
 | 层 | 命令 | 作用 |
 | --- | --- | --- |
 | **行为基线** | `npm run baseline` | 每帧指纹 = `sha256(RNG 624 状态字 + 图元流 + 预算/元素数 + 渲染绘制指令)`，4 组 × 400 帧。不需要 python3 与浏览器，几秒跑完；只有**没打算改**的东西变了才失败，有意改就 `baseline:update` 重录 |
-| **Node 自检** | `npm run smoke` | 假 canvas 校验参数合法性 / 图元是否全被识别 / 绘制开销；直接构造 `App` 手动推帧，验证定格帧、固定步长、暂停、异常兜底、种子规则与逐字符守卫（13 收 / 6 拒） |
-| **真浏览器** | `npm run browser` | ① `file://` 打开构建产物，断言"没报错 / 画面非空 / 场景与种子一致 / `?ui=0` 生效"；② 开发服务器的多文件页面，比对注入的 `<script>` 列表 == manifest，检查控制台便条只提字母个数不写出那个词，并用 `tools/typing_probe.html` 在 iframe 里**逐字符拼一遍** |
+| **Node 自检** | `npm run smoke` | 假 canvas 校验参数合法性 / 图元是否全被识别 / 绘制开销；直接构造 `App` 手动推帧，验证定格帧、固定步长、暂停、异常兜底、种子规则与逐字符守卫（13 收 / 6 拒）；并验证**调大预算真的会让画面变密**（450 → 1400 均值/峰值都要明显上升） |
+| **真浏览器** | `npm run browser` | Playwright 驱动系统 Chromium，真开页面、真打字、真按键：① `file://` 打开构建产物，断言"没报错 / 标题对 / 画面非空 / 场景与种子一致 / `?ui=0` 彻底无 UI"；② 开发服务器的多文件页面，比对注入的 `<script>` 列表 == manifest、控制台便条只提字母个数不写出那个词，并**逐字符真敲**一遍那个词、验证快捷键（滑块聚焦时 R 要能放、种子框打字时 R 不放、回车收焦点、Esc 随时有效） |
 | 跨语言随机数 | `npm run rng` | 与 CPython `random.Random` 逐位对拍（需 python3） |
 
 基线能抓什么，实测：
@@ -102,10 +123,11 @@ npm run verify     # 体检 + 自检 + 行为基线（日常就这一条）
 | 追加一发 | R 或「放一发」 |
 | 收起面板 | Esc 或「收起 UI」 |
 | 换种子 | 「随机种子」；想换开场就往种子里敲字母 |
+| 注意 | 在种子框里打字时，空格 / R 让位给输入（那是彩蛋的输入）；回车或点一下画面就把键盘还给快捷键，Esc 任何时候都有效 |
 | 重放 / 存图 | 「重放本场」/「存 PNG」 |
-| 性能保护 | 「图元上限」滑块（80~1500，默认 450） |
+| 画面容量 | 「绘制预算」滑块（80~1500，默认 450） |
 
-URL 参数：`?seed=7`、`?scene=classic|random`、`?frames=90`、`?still=1`、`?ui=0`、`?max=450`、
+URL 参数：`?seed=7`、`?scene=classic|random`、`?frames=90`、`?still=1`、`?ui=0`、`?max=900`、
 `?w=924&h=691`
 
 * `frames=N` 先走 N 个固定步再定格（第 1 帧 = `step(0)`）；`still=1` 等价于 `frames=1`
@@ -121,10 +143,10 @@ URL 参数：`?seed=7`、`?scene=classic|random`、`?frames=90`、`?still=1`、`
 | `src/elements.js` | 186 | 图元基类、爆心闪光、余烬、火星（真实轨迹尾迹） |
 | `src/trails.js` | 99 | 弹体、发射尾迹 |
 | `src/firework.js` | 141 | 发射 → 顶点炸开 |
-| `src/show.js` | 141 | 每帧顺序、绘制预算与节流、两个场景、齐射 |
+| `src/show.js` | 165 | 每帧顺序、绘制预算（容量）与节奏、两个场景、齐射 |
 | `src/view.js` | 119 | canvas 渲染器：仿射变换 + 整屏重绘 + 折线圆头描边 |
 | `src/app.js` | 224 | 应用核心：状态、种子规则、固定步长主循环（**不碰 DOM**） |
-| `src/ui.js` | 190 | 全部 DOM：控制台、HUD、键盘、存 PNG、逐字符守卫、启动 |
+| `src/ui.js` | 199 | 全部 DOM：控制台、HUD、键盘、存 PNG、逐字符守卫、启动 |
 
 数据流：`ui.js` → `app.js`（固定步长）→ `show.js`（每帧顺序）→ `elements/trails/firework`
 产出图元流 → `view.js` 画到 canvas。
@@ -141,8 +163,9 @@ tools/
   baseline.js|json    行为基线：录制 / 比对每帧指纹（日常主力）
   render_smoke.js     Node 自检：假 canvas 渲染 + 主循环 + 种子规则
   fake_canvas.js      假 canvas 上下文 + window/rAF 桩 + 模块加载
-  browser_check.js    真浏览器自检：交付产物 + 开发服务器 + 控制台便条
-  typing_probe.html   逐字符拼那个词的夹具（被 browser_check 驱动，不需要 CDP）
+  pw.js               Playwright + 开发服务器的公共件（驱动系统 Chromium）
+  browser_check.js    真浏览器自检：交付产物 + 开发服务器 + 便条 + 打字 + 快捷键
+  shot.js             截图（--spam N 按 N 次 R、--step M 再推 M 帧，结果确定可复现）
   rng_check.js        MT19937 与 CPython 逐位对拍（需 python3）
   dump_rng.py|js      随机数序列导出（rng_check 用）
   loader.js           在 Node 里按顺序加载 src 模块

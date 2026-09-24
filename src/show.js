@@ -43,14 +43,37 @@
 
   Show.prototype.add = function (e) { this.elements.push(e); };
 
-  /** 画布快满了就少放几颗火星（烟花照放，只是稀一点）。依据是上一帧的实际图元数。 */
-  Show.prototype.density = function () {
+  /**
+   * 拥挤度 -> 放量倍率。上一帧的实际图元数 / 预算 就是拥挤度：
+   * 空着就多发、每发更大；满了就少发、每发更小。
+   * 预算是**画面容量**而不是死线（节流是启发式的，单帧峰值会超过它）。
+   */
+  Show.prototype.crowd = function () {
     if (this.maxGeos <= 0) return 1.0;
-    var ratio = this.lastGeos / this.maxGeos;
-    if (ratio < 0.55) return 1.0;
-    if (ratio < 0.85) return 0.65;
-    if (ratio < 1.10) return 0.4;
-    return 0.25;
+    var load = this.lastGeos / this.maxGeos;
+    if (load >= 1.15) return 0.25;      // 超了：明显收敛
+    if (load >= 0.95) return 0.40;
+    if (load >= 0.72) return 0.65;
+    if (load >= 0.48) return 1.0;       // 差不多：按原样
+    if (load >= 0.28) return 1.5;       // 还空：多发、每发大一点
+    if (load >= 0.12) return 2.2;
+    return 3.0;                         // 空得很：铺满
+  };
+
+  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。 */
+  Show.prototype.density = function () { return Math.min(2, this.crowd()); };
+
+  /** 发射节奏倍率：间隔除以它。 */
+  Show.prototype.pace = function () { return this.crowd(); };
+
+  /** 是否已经超出预算（预算 <= 0 = 不限，别把它当成"永远超了"）。 */
+  Show.prototype.full = function () {
+    return this.maxGeos > 0 && this.lastGeos > this.maxGeos;
+  };
+
+  /** 元素表的安全上限：按预算缩放（原来写死 260，预算调大后会把画面卡住）。 */
+  Show.prototype.elementCap = function () {
+    return (this.maxGeos > 0) ? Math.round(this.maxGeos * 0.6) : 2000;
   };
 
   Show.prototype.spawn = function (style, launch, burst, palette, o) {
@@ -71,7 +94,7 @@
 
   Show.prototype.spawnRandom = function (n) {
     for (var i = 0; i < n; i++) {
-      if (this.lastGeos > this.maxGeos || this.elements.length > 260) return;
+      if (this.full() || this.elements.length > this.elementCap()) return;
       var style = this.rng.choice(STYLE_NAMES);         // 已经画不完了，这波先不放
       var lb = this.randomLaunch();
       this.spawn(style, lb[0], lb[1], data.randomPalette(this.rng));
@@ -120,13 +143,14 @@
     for (i = 0; i < fws.length; i++) if (!fws[i].done()) aliveFws.push(fws[i]);
     this.fireworks = aliveFws;
 
-    // 4) 排下一发（定期来一波齐射）
+    // 4) 排下一发（定期来一波齐射）。节奏也跟着拥挤度走：空的时候间隔更短、
+    //    齐射更大，所以把预算调大是真的会变满，而不只是"少压一点"。
     if (this.time >= this.nextFinale) {
-      this.nextFinale = this.time + this.rng.uniform(18.0, 30.0);
-      this.spawnRandom(this.rng.randint(2, 4));
+      this.nextFinale = this.time + this.rng.uniform(18.0, 30.0) / this.pace();
+      this.spawnRandom(Math.round(this.rng.randint(2, 4) * this.density()));
       this.nextSpawn = this.time + 2.0;
     } else if (this.time >= this.nextSpawn) {
-      this.nextSpawn = this.time + this.rng.uniform(0.9, 2.3);
+      this.nextSpawn = this.time + this.rng.uniform(0.9, 2.3) / this.pace();
       this.spawnRandom(1);
     }
   };

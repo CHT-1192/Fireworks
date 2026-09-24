@@ -66,6 +66,45 @@ for (const r of rows) {
   if (!(r.segs > 0)) problems.push(`${r.scene} 没有任何折线描边，尾迹没画出来`);
 }
 
+/* ------------------------------------------------ 1.5) 绘制预算真的会改变画面密度 */
+
+/** 跑一段，返回图元峰值与均值。 */
+function densityOf(budget, secs) {
+  const show = new FW.show.Show(924, 691, new FW.rng.Random(7), { maxGeos: budget });
+  FW.show.build(show, 'random');
+  const n = Math.round(secs * 60);
+  let peak = 0, sum = 0;
+  for (let i = 0; i < n; i++) {
+    show.step(i === 0 ? 0 : 1 / 60);
+    peak = Math.max(peak, show.frameGeos.length);
+    sum += show.frameGeos.length;
+  }
+  return { peak, avg: sum / n };
+}
+
+// 预算是"画面容量"：调大必须真的更满（以前它只能往下压，调大毫无效果）
+const small = densityOf(450, 60);
+const big = densityOf(1400, 60);
+const budgetProblems = [];
+if (!(big.avg > small.avg * 1.5)) {
+  budgetProblems.push(`调大预算没让画面变密：均值 ${small.avg.toFixed(0)} -> ${big.avg.toFixed(0)}`);
+}
+if (!(big.peak > small.peak * 1.4)) {
+  budgetProblems.push(`调大预算没让峰值变高：${small.peak} -> ${big.peak}`);
+}
+if (!(small.avg > 0)) budgetProblems.push('预算 450 时画面是空的');
+
+console.log('绘制预算自检（预算是容量目标：空则多发、满则收敛）');
+console.log('─'.repeat(76));
+if (budgetProblems.length) {
+  for (const p of budgetProblems) console.log('  ✗ ' + p);
+} else {
+  console.log(`  OK   预算 450 -> 均值 ${small.avg.toFixed(0)} / 峰值 ${small.peak}`
+    + `；1400 -> 均值 ${big.avg.toFixed(0)} / 峰值 ${big.peak}`);
+}
+console.log('─'.repeat(76));
+for (const p of budgetProblems) problems.push(p);
+
 /* ------------------------------------------------ 2) 主循环 */
 
 const { App } = FW.app;

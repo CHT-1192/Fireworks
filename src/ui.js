@@ -19,7 +19,7 @@
     $('hud-seed').textContent = this.seed;
     $('hud-scene').textContent = this.scene;
     $('hud-fps').textContent = this.fps.toFixed(0);
-    $('hud-budget').textContent = this.show.lastGeos;
+    $('hud-budget').textContent = this.show.lastGeos + ' / ' + this.show.maxGeos;
     $('hud-geos').textContent = this.renderer.geos;
     $('hud-segs').textContent = this.renderer.segs;
     $('hud-els').textContent = this.show.elements.length;
@@ -48,7 +48,9 @@
     var hidden = this.hideUi || this.uiHidden;
     $('panel').hidden = hidden;
     $('hud').hidden = hidden;
-    $('show').hidden = !hidden;             // 收起后留着「≡ 控制台」按钮
+    // ?ui=0 是"彻底无 UI"（截图 / 嵌入），连恢复按钮都不留；
+    // 手动「收起 UI」才留一个「≡ 控制台」把面板叫回来。
+    $('show').hidden = this.hideUi || !hidden;
   };
 
   FW.app.App.prototype.toggleUi = function () {
@@ -102,6 +104,11 @@
     // 聚焦就全选：想换种子直接敲，不用先手动删掉旧的
     input.addEventListener('focus', function () { this.select(); });
 
+    // 回车 = 敲完了：收起焦点，快捷键随即恢复（否则 R 还会被当成在打字）
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') this.blur();
+    });
+
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
       if (/^\d+$/.test(this.value)) self.rebuild(undefined, this.value);
@@ -118,6 +125,11 @@
     $('replay').addEventListener('click', function () { self.rebuild(self.scene, self.seed); });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
+    // 点一下画面 = 我看完了：把焦点从种子框收回，R 之类立刻恢复
+    this.canvas.addEventListener('pointerdown', function () {
+      var el = document.activeElement;
+      if (el && el.id === 'seed') el.blur();
+    });
     $('show').addEventListener('click', function () { self.toggleUi(); });
     $('budget').addEventListener('input', function () {
       self.maxGeos = parseInt(this.value, 10);
@@ -129,10 +141,18 @@
   FW.app.App.prototype.bindKeys = function () {
     var self = this;
     window.addEventListener('keydown', function (e) {
-      if (e.target && /input|select|textarea/i.test(e.target.tagName)) return;
+      // Esc 永远有效（它不会往输入框里塞字符）
+      if (e.key === 'Escape') { self.toggleUi(); return; }
+      // 只有"真的在往里打字"的控件才让出快捷键。原来是 input/select/textarea 一概
+      // 让位 —— 而「绘制预算」滑块本身就是 <input>，拖完滑块再按 R 会毫无反应。
+      var el = e.target || {};
+      var tag = String(el.tagName || '').toLowerCase();
+      var typing = (tag === 'textarea') || (tag === 'select')
+        || (tag === 'input'
+            && /^(text|number|search|email|url|password|tel)$/.test(el.type || 'text'));
+      if (typing) return;
       if (e.code === 'Space') { e.preventDefault(); self.togglePause(); }
       else if (e.key === 'r' || e.key === 'R') self.extra();
-      else if (e.key === 'Escape') self.toggleUi();
     });
   };
 
