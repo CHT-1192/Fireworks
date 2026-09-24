@@ -107,6 +107,8 @@ FakeCtx.prototype.stroke = function () {
 function stubWindow(w, h, dpr) {
   global.window = { devicePixelRatio: dpr === undefined ? 1 : dpr,
                     innerWidth: w, innerHeight: h };
+  // app.js 的 shareUrl() 基于"当前页面地址"，Node 里给一个假地址即可
+  global.location = { href: 'https://example.test/Fireworks/?seed=7' };
   // 主循环用 requestAnimationFrame 排下一帧；Node 里没有，桩成空实现
   // （测试直接调 stepFrame/tick，自己控制时间戳）
   global.requestAnimationFrame = function () { return 0; };

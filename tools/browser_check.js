@@ -45,13 +45,25 @@ function readSecret() {
   return m[1];
 }
 
+/** 链接里所有参数的值（不含参数名）—— 那个词要是漏出去，只会出现在值里。 */
+function queryValues(url) {
+  const q = String(url).split('?')[1];
+  if (!q) return [];
+  return q.split('&').filter(Boolean).map((kv) => decodeURIComponent(kv.slice(kv.indexOf('=') + 1)));
+}
+
+/** 凡是会被转发的链接，参数值必须都是纯数字。 */
+function shareParamsNumeric(url) {
+  return queryValues(url).every((v) => /^\d+$/.test(v));
+}
+
 const DIST_CASES = [
   // 第 1 帧只有两枚上升中的弹体（尾迹还没成形），所以只要求"画了东西"
   { name: '数字种子第1帧', q: 'seed=7&still=1', time: 0, segs: false, seed: '7' },
-  // 那个词 = 一次插播：这一帧比普通种子多两发（minFw）
-  { name: '那个词第1帧', q: 'seed=' + readSecret() + '&still=1', time: 0, segs: false,
-    seed: readSecret(), minFw: 4 },
-  { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1', time: 0, segs: false },
+  // 那个词不是种子：写进 URL 也退回数字（否则链接就能把它传出去）
+  { name: '那个词写进 URL 也没用', q: 'seed=' + readSecret() + '&still=1', time: 0, segs: false,
+    seedNumeric: true, maxFw: 3 },
+  { name: '乱敲字母→退回数字', q: 'seed=KQXW&still=1', time: 0, segs: false, seedNumeric: true },
   { name: '老链接的 scene= 被无视', q: 'scene=classic&seed=9&still=1', time: 0, segs: false, seed: '9' },
   { name: 'seed=42 第150帧', q: 'seed=42&frames=150', time: 149 * DT, segs: true, seed: '42' },
   { name: 'seed=42 第150帧(无UI)', q: 'seed=42&frames=150&ui=0', time: 149 * DT, segs: true,
@@ -90,7 +102,10 @@ async function check(page, c, where) {
   if (c.segs && !(h.segs > 0)) problems.push(`线段数 ${h.segs} 不为正`);
   if (!(Math.abs(h.time - c.time) < 0.05)) problems.push(`时刻 ${h.time}s，预期 ${c.time.toFixed(2)}s`);
   if (c.seed && h.seed !== c.seed) problems.push(`种子是「${h.seed}」，应为「${c.seed}」`);
-  if (c.minFw && !(h.fw >= c.minFw)) problems.push(`在飞 ${h.fw} 发，插播后应至少 ${c.minFw} 发`);
+  if (c.seedNumeric && !/^\d+$/.test(String(h.seed))) {
+    problems.push(`种子应是数字，实际「${h.seed}」`);
+  }
+  if (c.maxFw && h.fw > c.maxFw) problems.push(`在飞 ${h.fw} 发，不该超过 ${c.maxFw} 发`);
   if (c.uiHidden) {
     if (!(await page.isHidden('#panel'))) problems.push('?ui=0 但控制台没收起');
     if (!(await page.isHidden('#show'))) problems.push('?ui=0 但恢复按钮还在（应该彻底无 UI）');
@@ -160,11 +175,17 @@ async function checkTyping(page, secret) {
   const before = await inFlight();
   await page.keyboard.type(secret.slice(1));
   const after = await inFlight();
-  steps.push(`敲完 -> 在飞 ${before} → ${after} 发`);
-  if (await value() !== secret) problems.push(`敲完后框里应是那个词，实际 [${await value()}]`);
+  const box = await value();
+  const st = await page.evaluate(() => ({ seed: FW.app.instance.seed,
+                                          share: FW.app.instance.shareUrl() }));
+  steps.push(`敲完 -> 在飞 ${before} → ${after} 发，种子 ${st.seed}`);
   if (after - before !== 2) problems.push(`敲完应插播 2 发，实际多了 ${after - before} 发`);
-  const shown = await page.textContent('#hud-seed');
-  if (shown !== secret) problems.push(`敲完后种子应变成那个词，实际 ${shown}`);
+  // 传播面：种子框、种子、分享链接里都不该留下那个词
+  if (!/^\d+$/.test(st.seed)) problems.push(`插播后种子应仍是数字，实际 ${st.seed}`);
+  if (box !== st.seed) problems.push(`敲完后种子框应刷回数字种子，实际 [${box}]`);
+  if (!shareParamsNumeric(st.share)) {
+    problems.push('分享链接里出现了非数字参数：' + st.share);
+  }
 
   await page.keyboard.press('Enter');               // 回车收焦点
   const focused = await page.evaluate(() => document.activeElement && document.activeElement.id);
@@ -255,8 +276,11 @@ async function checkDev(browser) {
     line(noteOk, '控制台便条',
          noteOk ? `提了"${SECRET.length} 个字母"、没写出那个词` : '文案不符合预期或写出了那个词');
 
-    // B4) 真键盘：逐字符拼词
+    // B4) 真键盘：逐字符拼词（敲对当场插播，且框里/链接里不留那个词）
     const typing = await checkTyping(r0.page, SECRET);
+    if (r0.logs.join('\n').includes(SECRET)) {
+      typing.problems.push('控制台把那个词打出来了');
+    }
     bad += typing.problems.length;
     line(typing.problems.length === 0, '逐字符拼词',
          typing.steps.join('；') + (typing.problems.length ? '\n        ' + typing.problems.join('\n        ') : ''));
@@ -401,6 +425,9 @@ async function checkInteract(browser) {
   const clip = await page.evaluate(() => navigator.clipboard.readText().catch(() => ''));
   const urlOk = clip.indexOf('seed=' + daily.got) >= 0 && clip.indexOf('?') > 0;
   if (!urlOk) problems.push('剪贴板里的链接不对：' + clip);
+  if (!shareParamsNumeric(clip)) {
+    problems.push('剪贴板里的链接带了非数字参数（那个词会顺着它传出去）：' + clip);
+  }
   steps.push(`链接 ${clip.slice(0, 72)}`);
 
   // D4) 存图：PNG 元数据里要有种子与链接，且图还能解码
@@ -419,7 +446,13 @@ async function checkInteract(browser) {
     problems.push(`PNG 元数据里的种子是「${meta.Seed}」，应为「${seedNow}」`);
   }
   if (!/seed=/.test(meta.Comment || '')) problems.push('PNG 元数据里没有这一场的链接');
+  if (!shareParamsNumeric(meta.Comment)) {
+    problems.push('PNG 元数据里的链接带了非数字参数：' + meta.Comment);
+  }
   if (!/seed/.test(pngName)) problems.push('PNG 文件名里没有种子：' + pngName);
+  if (!/^fireworks_seed\d+_t[\d.]+\.png$/.test(pngName)) {
+    problems.push('PNG 文件名里的种子不是纯数字：' + pngName);
+  }
   const imgDim = await page.evaluate(async (b64) => {
     const img = new Image();
     img.src = 'data:image/png;base64,' + b64;

@@ -98,8 +98,8 @@
       this.value = text;
       if (text === FW.app.SECRET) {               // 拼全了：当场插播一次
         self.interlude();
-        console.log('%c' + FW.app.SECRET + ' —— 插播参考图风格的两发',
-                    'color:#ffd34d;font-weight:700');
+        lastValid = this.value;                   // 框里已被刷回数字种子
+        console.log('%c插播：参考图风格的两发', 'color:#ffd34d;font-weight:700');
       }
     });
 
@@ -180,7 +180,7 @@
     var cyan = 'color:#7fd1ff;font-weight:600';
     console.log('%c烟花 · Fireworks', gold);
     console.log('seed %c' + app.seed, cyan);
-    if (app.secretFound) return;
+    if (app.eggFound) return;
     console.log('种子框只收数字。有一个 %c' + FW.app.SECRET.length
       + ' 个字母%c的词是例外 —— 一个一个敲试试。',
       'color:#ffd34d', 'color:inherit');

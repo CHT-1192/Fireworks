@@ -35,8 +35,17 @@ const W = 924;
 const H = 691;
 const FRAMES = 400;
 
-/** 覆盖到的种子（整场秀只有一种；最后一个就是那个词，它会多插播两发）。 */
-const SEEDS = ['7', '42', '123456', 'FIREWORKS'];
+/**
+ * 覆盖到的种子。最后一组是那个词的插播片段（它不是种子，所以单独点名：
+ * 只有这一组会额外调用 show.interlude()）。
+ */
+const SEEDS = ['7', '42', '123456'];
+
+function cases() {
+  const out = SEEDS.map((seed) => ({ seed }));
+  out.push({ seed: '7', interlude: true, name: 'seed=7+插播' });
+  return out;
+}
 
 // 渲染器也要被指纹覆盖：view.js 只依赖 window（设备像素比/视口）和一个 canvas
 // 上下文，所以给它一个假 canvas 就能在 Node 里跑，把"这一帧下了哪些绘制指令"
@@ -70,7 +79,7 @@ function runCase(cs) {
   const rng = new FW.rng.Random(cs.seed);
   const show = new FW.show.Show(W, H, rng, { maxGeos: FW.show.DEFAULT_GEOS });
   FW.show.build(show);
-  if (cs.seed === FW.app.SECRET) show.interlude();      // 与 app.js 的构造路径一致
+  if (cs.interlude) show.interlude();                   // 与 app.js 的插播路径一致
   const { canvas, ctx, problems } = makeFakeCanvas(W, H);
   const renderer = new FW.view.Renderer(canvas, 2);
   renderer.layout(W, H);
@@ -95,13 +104,13 @@ function runCase(cs) {
   return { sig: sig.join(''), geos: geos.join(','), els: els.join(','), segs: segs.join(',') };
 }
 
-function key(cs) { return `seed=${cs.seed}`; }
+function key(cs) { return cs.name || `seed=${cs.seed}`; }
 
 function collect() {
   const out = { note: '行为基线：每帧指纹 = sha256(RNG 624 状态字 + 图元流 + 预算/元素数 + 渲染绘制指令)，取前 8 位十六进制',
                 dt: DT, width: W, height: H,
                 maxGeos: FW.show.DEFAULT_GEOS, frames: FRAMES, cases: {} };
-  for (const seed of SEEDS) out.cases[`seed=${seed}`] = runCase({ seed });
+  for (const cs of cases()) out.cases[key(cs)] = runCase(cs);
   return out;
 }
 

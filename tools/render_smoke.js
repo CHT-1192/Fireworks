@@ -23,19 +23,20 @@ stubWindow(924, 691);
 const { canvas, ctx, problems } = makeFakeCanvas(924, 691);
 const FW = loadWithRenderer();
 
-const SEEDS = ['7', FW.app.SECRET];    // 普通种子 + 那个词（它会多插播两发）
+// 一个普通种子 + 同一个种子加一次插播（那个词触发的就是后者）
+const CASES = [{ seed: '7' }, { seed: '7', interlude: true, name: 'seed=7+插播' }];
 const FRAMES = 240;
 const rows = [];
 
 /* ------------------------------------------------ 1) 渲染路径 */
 
-for (const seed of SEEDS) {
+for (const cs of CASES) {
   const renderer = new FW.view.Renderer(canvas, 2);
   renderer.layout(924, 691);
-  const show = new FW.show.Show(924, 691, new FW.rng.Random(seed),
+  const show = new FW.show.Show(924, 691, new FW.rng.Random(cs.seed),
                                 { maxGeos: FW.show.DEFAULT_GEOS });
   FW.show.build(show);
-  if (seed === FW.app.SECRET) show.interlude();
+  if (cs.interlude) show.interlude();
   const before = ctx.ops;
   let segs = 0, geos = 0, drawn = 0;
   for (let i = 0; i < FRAMES; i++) {
@@ -45,26 +46,27 @@ for (const seed of SEEDS) {
     geos += renderer.geos;
     if (renderer.geos > 0) drawn++;
   }
-  rows.push({ seed, geos: Math.round(geos / FRAMES), segs: Math.round(segs / FRAMES),
+  rows.push({ name: cs.name || 'seed=' + cs.seed, geos: Math.round(geos / FRAMES),
+              segs: Math.round(segs / FRAMES),
               ops: Math.round((ctx.ops - before) / FRAMES), drawn });
 }
 
-console.log(`渲染路径自检（假 canvas，924×691，每种子 ${FRAMES} 帧，预算 ${FW.show.DEFAULT_GEOS}）`);
+console.log(`渲染路径自检（假 canvas，924×691，每组 ${FRAMES} 帧，预算 ${FW.show.DEFAULT_GEOS}）`);
 console.log('─'.repeat(76));
-console.log('  种子        图元/帧  线段/帧  绘制调用/帧  有画面的帧');
+console.log('  组            图元/帧  线段/帧  绘制调用/帧  有画面的帧');
 for (const r of rows) {
-  console.log(`  ${r.seed.padEnd(10)}  ${String(r.geos).padStart(6)}`
+  console.log(`  ${r.name.padEnd(12)}  ${String(r.geos).padStart(6)}`
     + `  ${String(r.segs).padStart(7)}  ${String(r.ops).padStart(10)}`
     + `  ${String(r.drawn).padStart(10)}`);
 }
 console.log('─'.repeat(76));
 
 for (const r of rows) {
-  if (r.drawn === 0) problems.push(`seed=${r.seed} 一帧都没画出东西`);
+  if (r.drawn === 0) problems.push(`${r.name} 一帧都没画出东西`);
 }
-// 每个种子都必须真的在描边（尾迹是折线）
+// 每组都必须真的在描边（尾迹是折线）
 for (const r of rows) {
-  if (!(r.segs > 0)) problems.push(`seed=${r.seed} 没有任何折线描边，尾迹没画出来`);
+  if (!(r.segs > 0)) problems.push(`${r.name} 没有任何折线描边，尾迹没画出来`);
 }
 
 /* ------------------------------------------------ 1.5) 绘制预算真的会改变画面密度 */
@@ -179,12 +181,12 @@ const hold = frozen.show.time;
 for (let i = 0; i < 30; i++) { ts += 1000 / 60; frozen.stepFrame(ts); }
 if (frozen.show.time !== hold) loopProblems.push('暂停后时间还在走');
 
-// 2.4 种子规则：正常只收数字，那个词也认；其它字母一律退回数字种子
+// 2.4 种子规则：只收数字；那个词不是种子，写进 URL 也照样退回数字种子
 const SECRET = FW.app.SECRET;
 const cases = [
   ['seed=7', '7'],
   ['seed=007', '007'],
-  ['seed=%20' + SECRET.toLowerCase() + '%20', SECRET],   // 大小写/空格归一
+  ['seed=%20' + SECRET.toLowerCase() + '%20', null],     // 那个词：URL 里不认
   ['seed=%20', null],                                    // 空 -> 今天的种子（数字）
   ['scene=classic&seed=7', '7']                          // 老链接里的 scene= 直接无视
 ];
@@ -198,15 +200,24 @@ for (const [q, seed] of cases) {
 const bogus = makeApp('seed=KQXW');
 if (!/^\d+$/.test(bogus.seed)) loopProblems.push(`乱敲的字母种子应退回数字，实际 ${bogus.seed}`);
 
-// 那个词 = 一次插播：开场那两发之外多出参考图风格的两发（别的种子只有两发）
+// 2.4b 那个词 = 一次插播，而且**发不出去**：
+// 直接触发只是多两发，种子不动，链接/文件名/元数据里都不该出现它
 const plain = makeApp('seed=7&w=924&h=691');
-const wordy = makeApp('seed=' + SECRET + '&w=924&h=691');
+const egg = makeApp('seed=7&w=924&h=691');
+egg.interlude();
 if (plain.show.fireworks.length !== 2) {
   loopProblems.push(`普通种子开场应有 2 发，实际 ${plain.show.fireworks.length}`);
 }
-if (wordy.show.fireworks.length !== plain.show.fireworks.length + 2) {
-  loopProblems.push(`那个词开场应多插播 2 发，实际 ${wordy.show.fireworks.length} 发`);
+if (egg.show.fireworks.length !== plain.show.fireworks.length + 2) {
+  loopProblems.push(`插播应多 2 发，实际 ${egg.show.fireworks.length} 发`);
 }
+if (egg.seed !== '7') loopProblems.push(`插播不该改种子，实际 ${egg.seed}`);
+const shareQuery = egg.shareUrl().split('?')[1] || '';
+if (!/^seed=\d+(&max=\d+)?$/.test(shareQuery)) {
+  loopProblems.push('分享链接的参数里出现了非数字：' + egg.shareUrl());
+}
+if (FW.app.seedFromRaw(SECRET) !== '') loopProblems.push('seedFromRaw 不该放那个词进来');
+if (!egg.eggFound) loopProblems.push('插播后没有记住"词已找到"（控制台提示该闭嘴了）');
 
 // 逐字符守卫（种子框只允许"数字"或"密语的正确前缀"）—— 彩蛋就靠它做反馈
 const wrongFirst = (SECRET[0] === 'Q') ? 'Z' : 'Q';
@@ -221,9 +232,16 @@ for (const s of badTexts) {
   if (FW.app.seedContentOk(s)) loopProblems.push(`种子框本该拒绝「${s}」`);
 }
 
-// 同一个密语必须放出同一场
-const c1 = makeApp('seed=' + SECRET + '&frames=30'), c2 = makeApp('seed=' + SECRET + '&frames=30');
-if (c1.show.lastGeos !== c2.show.lastGeos) loopProblems.push('密语种子不可复现');
+// 同一次插播也必须可复现（它同样消耗 rng，所以两次要走同一条路）
+function eggRun() {
+  const show = new FW.show.Show(924, 691, new FW.rng.Random('7'),
+                                { maxGeos: FW.show.DEFAULT_GEOS });
+  FW.show.build(show);
+  show.interlude();
+  for (let i = 0; i < 30; i++) show.step(i === 0 ? 0 : 1 / 60);
+  return [show.lastGeos, show.elements.length, show.fireworks.length].join('|');
+}
+if (eggRun() !== eggRun()) loopProblems.push('同一个种子 + 同样一次插播不可复现');
 
 // 2.5 渲染器抛异常要被 tick 兜住（onError），而不是把主循环打断
 const boom = makeApp('seed=7&frames=10&w=924&h=691');
@@ -240,7 +258,7 @@ if (loopProblems.length) {
   for (const p of loopProblems) console.log('  ✗ ' + p);
 } else {
   console.log(`  OK   定格 (N-1)/60 秒、60 帧推进 ${advanced.toFixed(3)}s、暂停不走、异常被兜住`);
-  console.log(`  OK   数字种子照收、那个词多插播 2 发、逐字符守卫 ${okTexts.length} 收 / ${badTexts.length} 拒、可复现`);
+  console.log(`  OK   数字种子照收、那个词不是种子、插播只多 2 发且不进链接、逐字符守卫 ${okTexts.length} 收 / ${badTexts.length} 拒、可复现`);
 }
 console.log('─'.repeat(76));
 for (const p of loopProblems) problems.push(p);

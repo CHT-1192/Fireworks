@@ -21,6 +21,9 @@
    * 而是一次**插播**：两发参考图风格的烟花。正常只收数字，字母必须一个字符一个
    * 字符敲对才留得下来（敲错的当场被弹回去），所以"一个一个字母试"本身就有反馈。
    * 换词就改这一行 —— 提示语里的字母个数会自动跟着变。
+   *
+   * 它**不是种子**：敲对的那一刻只往正在放的这场里插两发，种子仍是原来那个数字。
+   * 所以链接、文件名、PNG/WebM 元数据里都不会出现它 —— 那个词发不出去。
    */
   var SECRET = 'FIREWORKS';
 
@@ -30,11 +33,10 @@
     return text === SECRET.slice(0, text.length);
   }
 
-  /** 外部来的种子（URL / 输入框）规整：数字原样、密语原样，其它一律不认。 */
+  /** 外部来的种子（URL / 存储 / 输入框）规整：只认数字，其它一律不认。 */
   function seedFromRaw(raw) {
-    var text = String(raw == null ? '' : raw).trim().toUpperCase();
-    if (/^\d+$/.test(text)) return text;
-    return text === SECRET ? text : '';
+    var text = String(raw == null ? '' : raw).trim();
+    return /^\d+$/.test(text) ? text : '';
   }
 
   /**
@@ -55,7 +57,7 @@
     if (raw) this.store.set('seed', raw);                 // 只记住明确选过的种子
     else raw = seedFromRaw(this.store.get('seed'));
     if (!raw) raw = String(FW.rng.dailySeed());           // 第一次来：今天这一场
-    this.secretFound = (raw === SECRET);
+    this.eggFound = false;               // 那个词只在本场被敲对时置位，不进 URL/存储
     this.seed = raw;
     this.maxGeos = parseInt(q.get('max'), 10) || FW.show.DEFAULT_GEOS;
     // ?w=&h= 钉死逻辑坐标系（对应原版的 --width/--height）：构图与窗口大小无关
@@ -107,8 +109,6 @@
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
     FW.show.build(this.show);
-    // 那个词当种子时：开场就插播一次（中途敲对了则当场插播，见 interlude()）
-    if (this.secretFound) this.show.interlude();
     this.acc = 0.0;
     if (this.freezeFrames !== null) {
       // 固定步长走 N 帧后定格（第 1 帧 = step(0)，就是初始几何）
@@ -127,7 +127,6 @@
     if (seed !== undefined && seed !== null) {
       var raw = seedFromRaw(seed);
       if (!raw) raw = String(FW.rng.defaultSeed());      // 认不出来就换个数字种子
-      this.secretFound = (raw === SECRET);
       this.seed = raw;
       this.store.set('seed', raw);
     }
@@ -142,15 +141,13 @@
 
   /**
    * 插播：往**正在放的**这场里塞两发参考图风格（那个词刚被敲对时调用）。
-   * 不重开——画面接着放，只是多了这两发。种子随之变成那个词，所以复制出去的
-   * 链接里也带着它，别人打开会在开场插播同样的一次。
+   * 不重开——画面接着放，只是多了这两发。**种子不动**：那个词不是种子，只在敲对的
+   * 这一刻生效，所以分享链接、文件名与元数据里永远只有那个数字种子，带不走它。
    */
   App.prototype.interlude = function () {
     this.show.interlude();
-    this.secretFound = true;
-    this.seed = SECRET;
-    this.store.set('seed', SECRET);
-    this.syncPanel();
+    this.eggFound = true;
+    this.syncPanel();          // 顺带把种子框刷回数字：屏幕上不留那个词的痕迹
   };
 
   /* --------------------------------------------------------------- 主循环 */
