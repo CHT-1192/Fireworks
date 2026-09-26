@@ -979,10 +979,8 @@ setTimeout(function () {
   Firework.prototype.burst = function () {
     this.phase = 'burst';
     this.rocket.alive = false;              // 弹体到此为止（尾迹不再喂点，自己熄灭）
-    // 上升尾迹的默认 fadeTime 是 3.4s（够盖住 1.5s 的上升段，整条拖尾都能看见），
-    // 但那意味着爆完之后天上还挂着一条慢慢熄的尾迹。这里一爆就把它切成快熄：
-    // 于是"炸开之后大约半秒，这一发就什么都不剩了"。
-    this.trail.fadeTime = 0.35;
+    // 上升尾迹**照旧挂着慢慢熄**（Trail 默认 fadeTime 3.4s）：那是弹体留下的一道烟迹，
+    // 是这一发"来过"的痕迹，别在爆开那一刻把它抹掉（试过切成 0.35s，观感像尾迹突然消失）。
     var rng = this.rng, spec = this.spec, pal = this.palette;
     var count = (this.count !== null) ? this.count : rng.randint(spec.count[0], spec.count[1]);
     // 画布太满就少炸几颗，别把帧率拖垮
