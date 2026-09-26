@@ -97,8 +97,8 @@ const budgetProblems = [];
 if (!(big.avg > small.avg * 1.5)) {
   budgetProblems.push(`调大预算没让画面变密：均值 ${small.avg.toFixed(0)} -> ${big.avg.toFixed(0)}`);
 }
-// 峰值只要求"明显更高"：它是 60 秒里的单帧最大值，两种子撞在一起齐射就窜一下，
-// 单种子抖动大（实测 1.3~1.6 倍）；均值才是稳定的信号（1.5 倍以上）。
+// 峰值只要求"明显更高"：口径换成段数之后，单帧最大值由齐射主导，实测 1.3~1.6 倍，
+// 单种子抖动大；均值才是稳定信号（要求 1.5 倍以上）。
 if (!(big.peak > small.peak * 1.2)) {
   budgetProblems.push(`调大预算没让峰值变高：${small.peak} -> ${big.peak}`);
 }

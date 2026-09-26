@@ -85,29 +85,26 @@
   /**
    * 每种花型的参数区间（都是程序化随机取值的范围）
    *   jitter    —— 角度分层的抖动比例：把 360° 均分给 count 个火花
+   *   life      —— 火花寿命：撑到半径只要 0.2~0.5s（时间常数 1/drag），剩下的是
+   *                下坠与拖尾 —— 这段"余韵"就是花型该有的样子，别乱收
    *   trail     —— 尾迹保留时长（秒，0/缺省 = 不留尾迹）
    *   trail_seg —— 尾迹最多分几段（图元预算）
-   *
-   * life 为什么这么短：阻尼模型下弹开很快（时间常数 1/drag ≈ 0.2~0.5s 就撑到
-   * 半径了），原先 2~3.8s 的 life 里，后 2/3 全是"下坠 + 拖尾"的余韵 —— 一发
-   * 炸完要三四秒才干净，画面里常年压着上一发的残影。现在 life 收到 ~0.6 倍、
-   * trail 同比收短，让每发"炸开就该收尾"，代价是下坠距离变短、弧线没以前明显
-   * （想要弧度回来就加大 gravity，或把 life 调回去一点）。
+   *   ember     —— 火花每秒掉几颗余烬（willow / palm 才有）
    */
   var STYLES = {
     spoke: { count: [10, 13], radius: [140, 215], dot: [10.0, 12.0], drag: 5.0,
-             life: [1.15, 1.65], gravity: 95.0, jitter: 0.18, trail: 1.3, trail_seg: 2 },
+             life: [2.1, 3.0], gravity: 95.0, jitter: 0.18, trail: 2.4, trail_seg: 2 },
     cloud: { count: [30, 44], radius: [120, 310], dot: [10.0, 12.0], drag: 2.6,
-             life: [1.25, 2.0], gravity: 70.0, jitter: 0.42, float_up: 26.0 },
+             life: [2.3, 3.6], gravity: 70.0, jitter: 0.42, float_up: 26.0 },
     ring: { count: [22, 32], radius: [150, 205], dot: [8.5, 10.5], drag: 3.4,
-            life: [1.05, 1.5], gravity: 90.0, jitter: 0.08, spread: 0.06,
-            trail: 0.95, trail_seg: 2 },
+            life: [1.9, 2.7], gravity: 90.0, jitter: 0.08, spread: 0.06,
+            trail: 1.7, trail_seg: 2 },
     willow: { count: [14, 20], radius: [70, 150], dot: [7.5, 9.5], drag: 2.0,
-              life: [1.4, 2.1], gravity: 140.0, jitter: 0.4,
-              trail: 0.5, trail_seg: 3, ember: 1.6 },
+              life: [2.6, 3.8], gravity: 140.0, jitter: 0.4,
+              trail: 0.85, trail_seg: 3, ember: 1.6 },
     palm: { count: [7, 10], radius: [190, 270], dot: [11.0, 13.0], drag: 3.0,
-            life: [1.2, 1.75], gravity: 115.0, jitter: 0.25,
-            trail: 0.85, trail_seg: 3, ember: 1.0 }
+            life: [2.2, 3.2], gravity: 115.0, jitter: 0.25,
+            trail: 1.5, trail_seg: 3, ember: 1.0 }
   };
   var STYLE_NAMES = Object.keys(STYLES);
 

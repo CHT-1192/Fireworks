@@ -141,7 +141,7 @@
                                 this.vx * 0.25 + this.show.rng.uniform(-14, 14),
                                 this.vy * 0.2 + this.show.rng.uniform(-10, 6),
                                 this.trailHot, this.size * 0.42,
-                                this.show.rng.uniform(0.35, 0.85)));
+                                this.show.rng.uniform(0.5, 1.3)));
       }
     }
     if (this.age >= this.life) this.alive = false;
