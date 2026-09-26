@@ -74,7 +74,7 @@ for (const r of rows) {
 /** 跑一段，返回图元峰值与均值。 */
 function densityOf(budget, secs) {
   const show = new FW.show.Show(924, 691, new FW.rng.Random(7), { maxGeos: budget });
-  FW.show.build(show, 'random');
+  FW.show.build(show);
   const n = Math.round(secs * 60);
   let peak = 0, sum = 0;
   for (let i = 0; i < n; i++) {

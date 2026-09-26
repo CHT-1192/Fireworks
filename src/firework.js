@@ -45,31 +45,31 @@
 
   /* ---------------------------------------------------------------- 上升 */
 
+  /**
+   * 上升段：推进弹体、喂尾迹、撒几颗余烬。
+   *
+   * 爆完之后这里**什么都不做**：原来还有个"爆炸后继续撒火星"的分支，只要发射尾迹
+   * 还在淡出（约 0.5~1.5s）就以 11 颗/秒在爆点继续喷余烬 —— 实测 61% 的余烬来自
+   * 那里，正是"烟花都爆完了粒子还在"的观感来源（那一刻在飞的 3 发全是已爆状态，
+   * 屏幕上却还有 21 火花 + 26 余烬）。爆点的碎屑交给火花自己掉（willow/palm 的
+   * ember 参数），别在烟花层面再补一份。
+   */
   Firework.prototype.update = function (dt) {
-    if (this.phase === 'rise') {
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
-      this.vy -= ROCKET_G * dt;
-      this.trail.push(this.x, this.y);                  // 把真实路径喂给尾迹
-      this.emberAcc += dt;
-      if (this.emberAcc > 0.07) {                       // 上升时撒一点火星
-        this.emberAcc = 0.0;
-        this.show.add(new el.Ember(this.show, this.x, this.y - 6,
-                                   this.rng.uniform(-10, 10), -this.rng.uniform(20, 60),
-                                   this.palette.stem, 2.2, this.rng.uniform(0.3, 0.7)));
-      }
-      if (this.vy <= 0.0) {
-        this.y = this.y1;
-        this.burst();
-      }
-    } else {
-      this.emberAcc += dt;
-      if (this.emberAcc > 0.09) {                       // 爆炸后尾巴上继续撒火星
-        this.emberAcc = 0.0;
-        this.show.add(new el.Ember(this.show, this.x, this.y,
-                                   this.rng.uniform(-25, 25), this.rng.uniform(20, 70),
-                                   this.palette.stem, 2.4, this.rng.uniform(0.5, 1.2)));
-      }
+    if (this.phase !== 'rise') return;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.vy -= ROCKET_G * dt;
+    this.trail.push(this.x, this.y);                    // 把真实路径喂给尾迹
+    this.emberAcc += dt;
+    if (this.emberAcc > 0.07) {                         // 上升时撒一点火星
+      this.emberAcc = 0.0;
+      this.show.add(new el.Ember(this.show, this.x, this.y - 6,
+                                 this.rng.uniform(-10, 10), -this.rng.uniform(20, 60),
+                                 this.palette.stem, 2.2, this.rng.uniform(0.25, 0.5)));
+    }
+    if (this.vy <= 0.0) {
+      this.y = this.y1;
+      this.burst();
     }
   };
 
@@ -78,6 +78,10 @@
   Firework.prototype.burst = function () {
     this.phase = 'burst';
     this.rocket.alive = false;              // 弹体到此为止（尾迹不再喂点，自己熄灭）
+    // 上升尾迹的默认 fadeTime 是 3.4s（够盖住 1.5s 的上升段，整条拖尾都能看见），
+    // 但那意味着爆完之后天上还挂着一条慢慢熄的尾迹。这里一爆就把它切成快熄：
+    // 于是"炸开之后大约半秒，这一发就什么都不剩了"。
+    this.trail.fadeTime = 0.35;
     var rng = this.rng, spec = this.spec, pal = this.palette;
     var count = (this.count !== null) ? this.count : rng.randint(spec.count[0], spec.count[1]);
     // 画布太满就少炸几颗，别把帧率拖垮

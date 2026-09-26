@@ -11,7 +11,7 @@
 | --- | --- |
 | **在线版** | <https://cht-1192.github.io/Fireworks/> |
 | **入口页** | <https://cht-1192.github.io/> —— 三个纯前端 Demo 的入口（另两个是 2D 光线追踪、网页版示波器） |
-| **离线单文件** | 下载 [dist/fireworks.html](dist/fireworks.html)，双击打开。103 KB，零外部请求 |
+| **离线单文件** | 下载 [dist/fireworks.html](dist/fireworks.html)，双击打开。104 KB，零外部请求 |
 | **自己跑开发版** | `npm start` → <http://127.0.0.1:9240/>（不需要 `npm install`） |
 
 ## 怎么玩
