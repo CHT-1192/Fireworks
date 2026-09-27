@@ -34,6 +34,9 @@
     this.elements = [];
     this.fireworks = [];
     this.frameGeos = [];                    // 最近一帧要画的图元（给渲染器）
+    this.onEvent = null;                    // 发射/爆炸的事件钩子（音效等 UI 层，只读）
+    this.auto = true;                       // 是否自动排下一发（"减少动效"时关掉）
+    this.motionScale = 1.0;                 // 每发规模的额外缩放（"减少动效"时压低）
     this.time = 0.0;
     this.nextSpawn = 0.0;
     this.nextFinale = rng.uniform(14.0, 22.0);
@@ -60,8 +63,10 @@
     return 3.0;                         // 空得很：铺满
   };
 
-  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。 */
-  Show.prototype.density = function () { return Math.min(2, this.crowd()); };
+  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。motionScale 是"减少动效"的降幅。 */
+  Show.prototype.density = function () {
+    return Math.min(2, this.crowd()) * this.motionScale;
+  };
 
   /** 发射节奏倍率：间隔除以它。 */
   Show.prototype.pace = function () { return this.crowd(); };
@@ -161,6 +166,8 @@
 
     // 4) 排下一发（定期来一波齐射）。节奏也跟着拥挤度走：空的时候间隔更短、
     //    齐射更大，所以把预算调大是真的会变满，而不只是"少压一点"。
+    //    auto = false 时完全不自动排（系统开了"减少动效"）：只有你按 R / 点画面才放。
+    if (!this.auto) return;
     if (this.time >= this.nextFinale) {
       this.nextFinale = this.time + this.rng.uniform(18.0, 30.0) / this.pace();
       this.spawnRandom(Math.round(this.rng.randint(2, 4) * this.density()));

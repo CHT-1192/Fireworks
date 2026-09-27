@@ -65,7 +65,9 @@ async function openPage(browser, url, o) {
   o = o || {};
   const page = await browser.newPage({
     viewport: o.viewport || { width: 1280, height: 800 },
-    deviceScaleFactor: o.scale || 1
+    deviceScaleFactor: o.scale || 1,
+    // o.reducedMotion: 'reduce' 用来模拟系统"减少动效"（media query 跟着变）
+    reducedMotion: o.reducedMotion || 'no-preference'
   });
   const logs = [];
   page.on('console', (m) => logs.push(m.text()));

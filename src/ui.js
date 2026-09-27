@@ -40,6 +40,7 @@
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
+    $('pause').setAttribute('aria-pressed', this.paused ? 'true' : 'false');
     // 「每日」是个开关：亮着 = 这一场会跟着日期自动换（每天零点后自己变成新的一天）
     var d = $('daily');
     if (d) {
@@ -48,7 +49,16 @@
         ? '今日这一场（已开启：跨日会自己换成新的一天）'
         : '回到今天这一场，并跟着日期自动更新';
     }
+    // 「声音」也是开关：亮着 = 有音效（首次点击/按键之后才真的出声，见 sound.js）
+    var s = $('sound');
+    if (s && this.sound) {
+      s.setAttribute('aria-pressed', this.sound.enabled ? 'true' : 'false');
+      s.title = this.sound.enabled
+        ? (FW.sound.supported() ? '音效已开（现场合成，没有音频文件）' : '这个浏览器不支持 Web Audio')
+        : '音效已关';
+    }
     document.title = '烟花 · Fireworks · seed ' + this.seed;
+    this.motionNote();
     this.applyUiVisibility();
     this.hud();
   };
@@ -113,6 +123,7 @@
         self.interlude();
         lastValid = this.value;                   // 框里已被刷回数字种子
         console.log('%c插播：参考图风格的两发', 'color:#ffd34d;font-weight:700');
+        self.say('插播：参考图风格的两发');
       }
     });
 
@@ -126,29 +137,42 @@
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(this.value, false);   // 敲数字 = 钉住这一场
-      else if (this.value === '') self.reseed();
+      if (/^\d+$/.test(this.value)) {
+        self.rebuild(this.value, false);                 // 敲数字 = 钉住这一场
+        self.say('换到 seed ' + self.seed);
+      } else if (this.value === '') self.reseed();
     });
   };
 
   FW.app.App.prototype.bindPanel = function () {
     var self = this;
     this.bindSeedInput();
-    $('dice-number').addEventListener('click', function () { self.reseed(); });
-    $('pause').addEventListener('click', function () { self.togglePause(); });
-    $('extra').addEventListener('click', function () { self.extra(); });
-    $('replay').addEventListener('click', function () { self.rebuild(self.seed); });
+    $('dice-number').addEventListener('click', function () {
+      self.reseed();
+      self.say('随机换一场，seed ' + self.seed);
+    });
+    $('pause').addEventListener('click', function () { self.pauseAndSay(); });
+    $('extra').addEventListener('click', function () { self.gesture(); self.extra(); });
+    $('replay').addEventListener('click', function () {
+      self.rebuild(self.seed);
+      self.say('从头再放一遍');
+    });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
     $('rec-stop').addEventListener('click', function () { self.stopRecord(); });
+    this.bindSound();
     // 点/触摸画面：在那里炸一发；顺便把焦点从种子框收回（R 之类立刻恢复）
     this.canvas.addEventListener('pointerdown', function (e) {
+      self.gesture();
       var el = document.activeElement;
       if (el && el.id === 'seed') el.blur();
       self.launchAt(e.clientX, e.clientY);
     });
-    $('daily').addEventListener('click', function () { self.daily(); });
+    $('daily').addEventListener('click', function () {
+      self.daily();
+      self.say('换到今天的这一场，seed ' + self.seed + '（会跟着日期自动更新）');
+    });
     $('share').addEventListener('click', function () { self.copyLink(this); });
     $('fullscreen').addEventListener('click', function () { self.toggleFullscreen(this); });
     $('show').addEventListener('click', function () { self.toggleUi(); });
@@ -176,8 +200,8 @@
         || (tag === 'input'
             && /^(text|number|search|email|url|password|tel)$/.test(el.type || 'text'));
       if (typing) return;
-      if (e.code === 'Space') { e.preventDefault(); self.togglePause(); }
-      else if (e.key === 'r' || e.key === 'R') self.extra();
+      if (e.code === 'Space') { e.preventDefault(); self.pauseAndSay(); }
+      else if (e.key === 'r' || e.key === 'R') { self.gesture(); self.extra(); }
     });
   };
 
@@ -199,7 +223,7 @@
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记两个键：上次的种子，和"每日"这个开关（隐私模式下会抛错，所以都包起来）。 */
+  /** localStorage 里记三个键：上次的种子 / "每日"开关 / "声音"开关（隐私模式下会抛错，都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
@@ -207,15 +231,32 @@
     };
   }
 
+  /** 音效引擎：只在浏览器支持时建；开关状态来自上次的选择（默认开）。 */
+  function soundEngine(st) {
+    if (!FW.sound || !FW.sound.supported()) return null;
+    return new FW.sound.Engine({ enabled: st.get('sound') !== '0' });
+  }
+
   function boot() {
+    var st = store();
+    var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     var inst = new FW.app.App({
       canvas: $('stage'),
       search: new URLSearchParams(location.search),
-      store: store()
+      store: st,
+      sound: soundEngine(st),                  // 音效引擎要在 bindPanel 之前就位
+      reducedMotion: !!(mq && mq.matches)
     });
     FW.app.instance = inst;
+    if (mq) inst.bindReducedMotion(mq);
     inst.start();
+    inst.syncPanel();                    // 声音开关的 aria 状态要一开始就对
     consoleNote(inst);
+    // 只在用户动作之后才播报（读屏用户一进来不该听一串状态）
+    if (inst.reduceMotion) {
+      console.log('系统设置：减少动效 —— 不自动放，只有手动才动');
+      inst.say('已按系统设置减少动效：只有你按 R 或点画面才放');
+    }
   }
 
   if (document.readyState === 'loading') {

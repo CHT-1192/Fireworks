@@ -115,6 +115,48 @@ if (budgetProblems.length) {
 console.log('─'.repeat(76));
 for (const p of budgetProblems) problems.push(p);
 
+/* ------------------------------------------------ 1.55) 事件钩子不影响模拟 */
+
+/**
+ * 音效是靠 Show.onEvent 这个钩子"听"模拟的。它必须**只读**：装了钩子之后，
+ * 同一颗种子跑出来的每一帧都要和没装时一模一样（否则音效就在偷偷改演出）。
+ */
+function eventHookFingerprint(withHook) {
+  const show = new FW.show.Show(924, 691, new FW.rng.Random(7),
+                                { maxGeos: FW.show.DEFAULT_GEOS });
+  let events = 0;
+  if (withHook) show.onEvent = function (ev) { events += ev.type === 'burst' ? 2 : 1; };
+  FW.show.build(show);
+  let h = 0;
+  for (let i = 0; i < 240; i++) {
+    show.step(i === 0 ? 0 : 1 / 60);
+    h = (h * 31 + show.lastGeos + show.elements.length * 7
+         + show.fireworks.length * 13 + show.frameGeos.length) % 1000000007;
+    for (const g of show.frameGeos) {
+      // 折线图元没有 x/y/wid/leng（它们是 segs 数组），所以先过滤掉非数值
+      const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+      h = (h * 31 + Math.round((n(g.x) + n(g.y) + n(g.wid) + n(g.leng)) * 1000)
+           + (g.segs ? g.segs.length : 1) + String(g.shape).length) % 1000000007;
+    }
+  }
+  return { h, events };
+}
+const noHook = eventHookFingerprint(false);
+const withHook = eventHookFingerprint(true);
+const hookProblems = [];
+if (noHook.h !== withHook.h) hookProblems.push('装了事件钩子之后模拟结果变了（音效不该影响演出）');
+if (!(withHook.events > 0)) hookProblems.push('事件钩子一个发射/爆炸事件都没收到');
+
+console.log('事件钩子自检（音效只"听"，不影响这一场）');
+console.log('─'.repeat(76));
+if (hookProblems.length) {
+  for (const p of hookProblems) console.log('  ✗ ' + p);
+} else {
+  console.log(`  OK   240 帧指纹一致（${noHook.h}），期间收到 ${withHook.events} 个发射/爆炸事件`);
+}
+console.log('─'.repeat(76));
+for (const p of hookProblems) problems.push(p);
+
 /* ------------------------------------------------ 1.6) PNG 元数据 */
 
 // crc32 用标准测试向量；插块用合成 PNG 往返（Node 里就能验，不用浏览器）

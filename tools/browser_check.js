@@ -358,13 +358,17 @@ async function checkRecord(browser) {
 
   if (hasFfprobe()) {
     const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries',
-      'format_tags:format=duration,bit_rate', '-of', 'json', file], { encoding: 'utf8' }));
+      'format_tags:format=duration,bit_rate:stream=codec_type', '-of', 'json', file],
+      { encoding: 'utf8' }));
+    const kinds = (j.streams || []).map((x) => x.codec_type);
+    if (!kinds.includes('audio')) problems.push('音效开着，但录出来的文件里没有音轨：' + kinds.join('+'));
+    if (!kinds.includes('video')) problems.push('录出来的文件里没有视频轨');
     const tags = (j.format && j.format.tags) || {};
     if (tags.SEED !== '7') problems.push('元数据里没有 SEED=7：' + JSON.stringify(tags));
     // 实际码率只做参考：黑底内容编码器会自己省（目标码率是上限）
     const got = Number(j.format.bit_rate || 0) / 1e6;
     steps.push(`ffprobe 读到 SEED=${tags.SEED}，时长 ${j.format.duration}s`
-      + (got ? `，实际 ${got.toFixed(1)}Mbps` : ''));
+      + `，轨 ${kinds.join('+')}` + (got ? `，实际 ${got.toFixed(1)}Mbps` : ''));
   } else {
     steps.push('（没有 ffprobe，跳过元数据检查）');
   }
@@ -551,12 +555,149 @@ async function checkInteract(browser) {
   return bad;
 }
 
+/* -------------------------------------------------  E) 音效与可访问性 */
+
+async function checkA11y(browser) {
+  console.log('\nE) 音效与可访问性');
+  if (!browser) {
+    console.log('  跳过：没有浏览器');
+    return 0;
+  }
+  let bad = 0;
+  const problems = [];
+  const steps = [];
+  const { page, logs } = await pw.openPage(browser, BASE + '/?seed=7&max=900',
+                                           { viewport: { width: 1280, height: 800 } });
+
+  // E1) 音效：默认开着；一次手势（按 R）之后上下文才建，随后发射/爆炸都有声音
+  await page.keyboard.press('r');                     // R 也算手势，顺带放一发
+  await page.mouse.click(640, 500);                   // 点画面：最强的手势路径
+  await page.waitForTimeout(2600);                    // 等自动发射的那几发炸开
+  const snd = await page.evaluate(() => ({
+    has: !!(FW.app.instance && FW.app.instance.sound),
+    enabled: FW.app.instance.sound ? FW.app.instance.sound.enabled : false,
+    pressed: document.getElementById('sound').getAttribute('aria-pressed'),
+    hidden: document.getElementById('sound').hidden,
+    stats: FW.app.instance.sound ? FW.app.instance.sound.stats() : null,
+    stored: localStorage.getItem('fw.sound')
+  }));
+  if (!snd.has) problems.push('没有音效引擎（Web Audio 不可用？）');
+  if (!snd.enabled || snd.pressed !== 'true') problems.push('声音默认应当是开着的：' + snd.pressed);
+  if (snd.hidden) problems.push('有 Web Audio 时「声音」按钮不该藏起来');
+  if (snd.stats && !(snd.stats.launches > 0)) problems.push('放了烟花却没合成发射音');
+  if (snd.stats && !(snd.stats.bursts > 0)) problems.push('炸开了却没合成爆炸音');
+  if (snd.stats && snd.stats.context !== 'running') {
+    problems.push('音频上下文没在跑（手势之后应当 running）：' + snd.stats.context);
+  }
+  steps.push(`音效 ${snd.stats ? snd.stats.launches + ' 发射 / ' + snd.stats.bursts + ' 爆炸' : '无'}`
+    + `，上下文 ${snd.stats ? snd.stats.context : '-'}`);
+  // 自动播放策略相关的报错：有手势就不该出现
+  const noise = logs.filter((x) => /AudioContext|NotAllowedError|autoplay/i.test(x));
+  if (noise.length) problems.push('控制台抱怨音频被拦：' + noise[0].slice(0, 90));
+
+  // 关掉：只是静音 + 记住选择
+  await page.click('#sound');
+  const off = await page.evaluate(() => ({
+    enabled: FW.app.instance.sound.enabled,
+    pressed: document.getElementById('sound').getAttribute('aria-pressed'),
+    stored: localStorage.getItem('fw.sound'),
+    gain: FW.app.instance.sound.master.gain.value,
+    said: document.getElementById('a11y-status').textContent
+  }));
+  if (off.enabled || off.pressed !== 'false' || off.stored !== '0' || off.gain !== 0) {
+    problems.push('关声音之后状态不对：' + JSON.stringify(off));
+  }
+  if (off.said !== '音效已关') problems.push('关声音没有播报，实际「' + off.said + '」');
+  await page.click('#sound');                          // 再打开，别影响后面的用例
+  steps.push(`开关：关掉 -> ${off.stored}/增益 ${off.gain}，播报「${off.said}」`);
+
+  // E2) 可访问性标记：地标、label、canvas 名字、播报区
+  const mk = await page.evaluate(() => ({
+    lang: document.documentElement.lang,
+    panel: document.getElementById('panel').getAttribute('aria-label'),
+    seedLabel: !!document.querySelector('label[for="seed"]'),
+    budgetLabel: !!document.querySelector('label[for="budget"]'),
+    canvasRole: document.getElementById('stage').getAttribute('role'),
+    canvasName: document.getElementById('stage').getAttribute('aria-label') || '',
+    liveRole: document.getElementById('a11y-status').getAttribute('role'),
+    liveMode: document.getElementById('a11y-status').getAttribute('aria-live'),
+    hudHidden: document.getElementById('hud').getAttribute('aria-hidden'),
+    shortcut: document.getElementById('extra').getAttribute('aria-keyshortcuts')
+  }));
+  if (!/^zh/.test(mk.lang)) problems.push('html lang 不对：' + mk.lang);
+  if (!mk.panel) problems.push('面板缺少无障碍名称（aria-label）');
+  if (!mk.seedLabel) problems.push('种子输入框没有关联的 label');
+  if (!mk.budgetLabel) problems.push('绘制预算滑块没有关联的 label');
+  if (mk.canvasRole !== 'img' || mk.canvasName.length < 6) problems.push('canvas 缺少 role/label');
+  if (mk.liveRole !== 'status' || mk.liveMode !== 'polite') problems.push('播报区不是 role=status/aria-live=polite');
+  if (mk.hudHidden !== 'true') problems.push('HUD 应该对读屏隐藏（数字一直在变）');
+  if (!mk.shortcut) problems.push('快捷键没有标注 aria-keyshortcuts');
+  steps.push('标记：lang / 面板名 / label×2 / canvas 名 / 播报区 / HUD 隐藏 都在');
+
+  // 键盘：焦点能到按钮，Enter 能触发，并且播报
+  await page.focus('#pause');
+  await page.keyboard.press('Enter');
+  const kb = await page.evaluate(() => ({
+    paused: FW.app.instance.paused,
+    pressed: document.getElementById('pause').getAttribute('aria-pressed'),
+    said: document.getElementById('a11y-status').textContent
+  }));
+  if (!kb.paused || kb.pressed !== 'true') problems.push('键盘没法暂停：' + JSON.stringify(kb));
+  if (kb.said !== '已暂停') problems.push('暂停没有播报，实际「' + kb.said + '」');
+  await page.keyboard.press('Space');                  // 空格再切回来
+  const kb2 = await page.textContent('#a11y-status');
+  if (kb2 !== '继续播放') problems.push('空格恢复没有播报，实际「' + kb2 + '」');
+  steps.push(`键盘：Enter 暂停（播报「${kb.said}」）、空格恢复（播报「${kb2}」）`);
+  await page.close();
+
+  // E3) 系统"减少动效"：不自动放、每发更小、面板上有一句说明；手动按 R 仍然放
+  const rm = await pw.openPage(browser, BASE + '/?seed=7&max=900',
+                               { viewport: { width: 1280, height: 800 },
+                                 reducedMotion: 'reduce' });
+  const rmState = await rm.page.evaluate(() => ({
+    rm: FW.app.instance.reduceMotion,
+    auto: FW.app.instance.show.auto,
+    scale: FW.app.instance.show.motionScale,
+    note: !document.getElementById('motion-note').hidden,
+    noteText: document.getElementById('motion-note').textContent,
+    said: document.getElementById('a11y-status').textContent
+  }));
+  if (!rmState.rm || rmState.auto !== false) problems.push('减少动效没有生效：' + JSON.stringify(rmState));
+  if (!(rmState.scale < 1)) problems.push('减少动效时每发应当更小，实际 ' + rmState.scale);
+  if (!rmState.note || !/减少动效/.test(rmState.noteText)) problems.push('面板上没有说明为什么不动');
+  if (!/减少动效/.test(rmState.said)) problems.push('没有向读屏说明"减少动效"，实际「' + rmState.said + '」');
+  // 数"发射次数"而不是元素数：开场那两发本来就会炸出一堆火花，和自动排新烟花是两码事
+  await rm.page.evaluate(() => {
+    const app = FW.app.instance;
+    window.__launches = 0;
+    const orig = app.show.onEvent;
+    app.show.onEvent = function (ev) {
+      if (ev.type === 'launch') window.__launches++;
+      return orig.apply(this, arguments);
+    };
+  });
+  await rm.page.waitForTimeout(1600);
+  const idle = await rm.page.evaluate(() => window.__launches);
+  if (idle > 0) problems.push(`减少动效下还在自动排烟花（1.6s 内发射 ${idle} 次）`);
+  await rm.page.keyboard.press('r');                   // 手动放：要有反应
+  await rm.page.waitForTimeout(300);
+  const manual = await rm.page.evaluate(() => window.__launches);
+  if (!(manual > 0)) problems.push('减少动效下手动放烟花也没反应');
+  steps.push(`减少动效：1.6s 内自动发射 ${idle} 次、手动 R 后 ${manual} 次`);
+  await rm.page.close();
+
+  bad += problems.length;
+  line(problems.length === 0, '音效 / 可访问性', steps.join('；')
+    + (problems.length ? '\n        ' + problems.join('\n        ') : ''));
+  return bad;
+}
+
 async function main() {
   const why = pw.whyUnavailable();
   if (why) console.log('（' + why + '）');
   else console.log('真浏览器端到端自检（Playwright + ' + pw.findChrome() + '）');
   console.log('─'.repeat(88));
-  // 开发服务器在这里起一次，B/C/D 三段共用，最后统一收掉（B1 不需要浏览器也要跑）
+  // 开发服务器在这里起一次，B/C/D/E 四段共用，最后统一收掉（B1 不需要浏览器也要跑）
   const server = await pw.ensureServer(PORT);
   const browser = why ? null : await pw.launch();
   let bad = 0;
@@ -565,6 +706,7 @@ async function main() {
     bad += await checkDev(browser, server);
     bad += await checkRecord(browser);
     bad += await checkInteract(browser);
+    bad += await checkA11y(browser);
   } finally {
     if (server) { try { server.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
     if (browser) await browser.close();

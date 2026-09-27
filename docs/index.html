@@ -1,7 +1,7 @@
 <!--
   烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
-  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> ebml.js -> record.js -> pngmeta.js -> actions.js -> ui.js
+  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> a11y.js -> ebml.js -> record.js -> pngmeta.js -> sound.js -> actions.js -> ui.js
   许可: Apache-2.0（见 LICENSE / NOTICE）
 -->
 <!doctype html>
@@ -54,7 +54,17 @@
     color: #ffd98a;
   }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
-  button:focus-visible { border-color: rgba(255, 211, 77, .6); }
+  /* 键盘焦点要看得见（只用 :focus-visible，鼠标点击不画框） */
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid #ffd34d; outline-offset: 1px; border-color: rgba(255, 211, 77, .6);
+  }
+  /* 读屏用：视觉上藏起来，但仍然会被朗读 */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+    border: 0;
+  }
+  #motion-note { margin: 0; font-size: 10.5px; line-height: 1.5; color: #ffd98a; }
 
   /* 种子：文本 + 两个小按钮，一行放下（标签不换行、输入框可压缩） */
   .seedrow { display: flex; align-items: center; gap: 6px; }
@@ -75,7 +85,7 @@
   .row > * { flex: 1; }
   .row.primary button { padding: 8px 9px; font-size: 12.5px; }
   /* 次要动作挤成一格一格，别和主操作一样重 */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 
   .budgetrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
                color: rgba(178, 198, 255, .6); white-space: nowrap; }
@@ -126,16 +136,24 @@
   @media (max-width: 520px) {
     #hud { display: none; }             /* 手机：画面优先 */
   }
+
+  /* 系统开了"减少动效"：连 CSS 的过渡/抖动动画也一起关掉（JS 那边见 src/a11y.js） */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+    }
+  }
 </style>
 </head>
 <body>
-<canvas id="stage"></canvas>
+<canvas id="stage" role="img" aria-label="程序化烟花秀的画面（纯装饰，操作都在左侧控制台）"></canvas>
 
-<aside id="panel">
+<aside id="panel" aria-label="控制台">
   <h1>烟花 · Fireworks</h1>
 
   <div class="seedrow">
-    <span class="lab">种子</span>
+    <label class="lab" for="seed">种子</label>
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
     <button id="dice-number" class="mini" title="随机换一个数字种子">随机</button>
     <button id="daily" class="mini" aria-pressed="false"
@@ -144,8 +162,8 @@
   <p class="help">配色、花型、位置全随机</p>
 
   <div class="row primary">
-    <button id="pause">暂停</button>
-    <button id="extra" title="快捷键 R；点画面则在那个位置炸">放一发</button>
+    <button id="pause" aria-pressed="false" aria-keyshortcuts="Space">暂停</button>
+    <button id="extra" aria-keyshortcuts="R" title="快捷键 R；点画面则在那个位置炸">放一发</button>
   </div>
 
   <div class="grid">
@@ -155,10 +173,14 @@
     <button id="record" class="mini" title="录成 WebM（只录画布，元数据里写种子）">录制</button>
     <button id="fullscreen" class="mini" title="全屏（Esc 退出）">全屏</button>
     <button id="hide" class="mini" title="收起面板（Esc）">收起</button>
+    <button id="sound" class="mini" aria-pressed="false"
+            title="音效开关（现场合成，没有音频文件）">声音</button>
   </div>
 
+  <p id="motion-note" hidden></p>
+
   <div class="budgetrow">
-    <span>绘制预算</span>
+    <label for="budget">绘制预算</label>
     <input id="budget" type="range" min="80" max="1500" step="20">
     <b id="budget-val">450</b>
   </div>
@@ -166,11 +188,13 @@
   <p class="hint">空格 暂停 · R 放一发 · Esc 收起 · 点画面 = 在那里炸一发</p>
 </aside>
 
+<p id="a11y-status" class="sr-only" role="status" aria-live="polite"></p>
+
 <button id="show" hidden>控制台</button>
 
-<div id="rec" hidden><b>录制中</b><span id="rec-time">0.0s</span><button id="rec-stop">停止</button></div>
+<div id="rec" hidden aria-hidden="true"><b>录制中</b><span id="rec-time">0.0s</span><button id="rec-stop">停止</button></div>
 
-<div id="hud">
+<div id="hud" aria-hidden="true">
   <div class="line">
     <span class="k">seed</span><b id="hud-seed">–</b>
     <span class="k">时刻</span><b id="hud-time">–</b>
@@ -951,6 +975,9 @@ setTimeout(function () {
     this.burstAge = 0.0;                    // 爆开之后过了多久（只用来卡爆心碎屑的窗口）
     this.count = (o.count === undefined) ? null : o.count;
     this.radius = (o.radius === undefined) ? null : o.radius;
+    // 事件钩子（音效等 UI 层用）：**只读**，不消耗 rng、不改状态，
+    // 所以同一个种子照样是同一场（render_smoke 里有断言）
+    if (show.onEvent) show.onEvent({ type: 'launch', style: style, x: this.x0, y: this.y0 });
   }
 
   /* ---------------------------------------------------------------- 上升 */
@@ -1013,6 +1040,11 @@ setTimeout(function () {
     var drag = spec.drag;
     var cx = this.x, cy = this.y;
     this.show.add(new el.Flash(this.show, cx, cy, pal, rng.uniform(26, 40)));
+    // 同上：音效等 UI 层挂钩，只读不写，不影响这一场
+    if (this.show.onEvent) {
+      this.show.onEvent({ type: 'burst', style: this.style, x: cx, y: cy,
+                          radius: rmax, count: count });
+    }
 
     var start = rng.uniform(0, 360);
     var sector = 360.0 / count;
@@ -1102,6 +1134,9 @@ setTimeout(function () {
     this.elements = [];
     this.fireworks = [];
     this.frameGeos = [];                    // 最近一帧要画的图元（给渲染器）
+    this.onEvent = null;                    // 发射/爆炸的事件钩子（音效等 UI 层，只读）
+    this.auto = true;                       // 是否自动排下一发（"减少动效"时关掉）
+    this.motionScale = 1.0;                 // 每发规模的额外缩放（"减少动效"时压低）
     this.time = 0.0;
     this.nextSpawn = 0.0;
     this.nextFinale = rng.uniform(14.0, 22.0);
@@ -1128,8 +1163,10 @@ setTimeout(function () {
     return 3.0;                         // 空得很：铺满
   };
 
-  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。 */
-  Show.prototype.density = function () { return Math.min(2, this.crowd()); };
+  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。motionScale 是"减少动效"的降幅。 */
+  Show.prototype.density = function () {
+    return Math.min(2, this.crowd()) * this.motionScale;
+  };
 
   /** 发射节奏倍率：间隔除以它。 */
   Show.prototype.pace = function () { return this.crowd(); };
@@ -1229,6 +1266,8 @@ setTimeout(function () {
 
     // 4) 排下一发（定期来一波齐射）。节奏也跟着拥挤度走：空的时候间隔更短、
     //    齐射更大，所以把预算调大是真的会变满，而不只是"少压一点"。
+    //    auto = false 时完全不自动排（系统开了"减少动效"）：只有你按 R / 点画面才放。
+    if (!this.auto) return;
     if (this.time >= this.nextFinale) {
       this.nextFinale = this.time + this.rng.uniform(18.0, 30.0) / this.pace();
       this.spawnRandom(Math.round(this.rng.randint(2, 4) * this.density()));
@@ -1411,7 +1450,7 @@ setTimeout(function () {
   }
 
   /**
-   * opts = { canvas, search, store }
+   * opts = { canvas, search, store, sound, reducedMotion }
    *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
    *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
    * 存储里两个键：`seed` = 这一场的数字种子，`daily` = '1' 表示这一场跟着日期走。
@@ -1421,6 +1460,7 @@ setTimeout(function () {
     var q = opts.search;
     this.canvas = opts.canvas;
     this.store = opts.store || { get: function () { return null; }, set: function () {} };
+    this.sound = opts.sound || null;      // 音效引擎由 ui.js 建好传进来（没有就是没有）
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
     // 种子的来源顺序：URL -> "每日"这个模式 -> 上次用过的 -> 今天这一场。都只认数字；
@@ -1451,6 +1491,8 @@ setTimeout(function () {
     else if (q.get('still') === '1' || q.get('still') === '') this.freezeFrames = 1;
     else this.freezeFrames = null;
     this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
+    // 系统开了"减少动效"：不自动排烟花，且每发小一号（只有你按 R / 点画面才放）
+    this.reduceMotion = !!opts.reducedMotion;
 
     this.paused = false;
     this.crashed = false;
@@ -1481,8 +1523,17 @@ setTimeout(function () {
   App.prototype.bindKeys = function () {};
   App.prototype.onError = function (err) { console.error(err); };
   App.prototype.onDayRoll = function () {};      // "每日"跨日自动换场后通知 UI
+  App.prototype.onShowEvent = function () {};    // 发射/爆炸事件（音效等），只读
 
   /* ------------------------------------------------------------ 构建 / 重开 */
+
+  /** 系统"减少动效"（UI 层随时可调）：关掉自动排烟花，并把每发压低一号。 */
+  App.prototype.setReduceMotion = function (on) {
+    this.reduceMotion = !!on;
+    this.show.auto = !this.reduceMotion;
+    this.show.motionScale = this.reduceMotion ? 0.55 : 1.0;
+    return this.reduceMotion;
+  };
 
   App.prototype.build = function () {
     var cw = this.canvas.clientWidth || this.canvas.width || 1;
@@ -1492,6 +1543,8 @@ setTimeout(function () {
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
+    this.show.onEvent = this.onShowEvent.bind(this);   // 事件钩子（音效），只读
+    this.setReduceMotion(this.reduceMotion);
     FW.show.build(this.show);
     this.acc = 0.0;
     if (this.freezeFrames !== null) {
@@ -1653,6 +1706,70 @@ setTimeout(function () {
 
   FW.app = { App: App, FIXED_DT: FIXED_DT, SECRET: SECRET,
              seedContentOk: seedContentOk, seedFromRaw: seedFromRaw };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/a11y.js ===================== */
+/* ============================================================================
+ * a11y.js —— 可访问性：读屏播报 + "减少动效"
+ * ---------------------------------------------------------------------------
+ * canvas 里的东西读屏软件一概看不见，所以这里补两件事：
+ *
+ *   1) 播报（`#a11y-status`，role="status" + aria-live="polite" 的视觉隐藏区）：
+ *      在**用户动作**之后说一句（暂停/换种子/音效开关/插播/存图…）。不播报每一发
+ *      烟花 —— 那是装饰，逐发播报只会把读屏用户淹掉。
+ *
+ *   2) 系统"减少动效"（prefers-reduced-motion）：开着就 `show.auto = false`（不再
+ *      自动排烟花，只有你按 R / 点画面才放）、`motionScale` 降到 0.55（每发小一号），
+ *      并且跟着系统设置的改变走。CSS 那边的过渡/动画也在 index.html 里一起关掉。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  function $(id) { return document.getElementById(id); }
+
+  /**
+   * 给读屏软件说一句。同一句话连说两次（比如连按两次暂停）也要能被读到：
+   * 先清空再写，才一定会触发 aria-live 的变化。
+   */
+  FW.app.App.prototype.say = function (text) {
+    var el = $('a11y-status');
+    if (!el) return;
+    el.textContent = '';
+    el.textContent = String(text);
+  };
+
+  /** 暂停/继续 + 播报（按钮和空格都走这里）。 */
+  FW.app.App.prototype.pauseAndSay = function () {
+    this.togglePause();
+    this.say(this.paused ? '已暂停' : '继续播放');
+  };
+
+  /** 顺手解锁音频上下文（浏览器要求"用户手势之后"才允许出声）。 */
+  FW.app.App.prototype.gesture = function () {
+    if (this.sound) { this.sound.ensure(); this.sound.resume(); }
+  };
+
+  /** 系统"减少动效"：读一次，并跟着系统设置的改变走。 */
+  FW.app.App.prototype.bindReducedMotion = function (mq) {
+    var self = this;
+    this.setReduceMotion(mq.matches);
+    if (mq.addEventListener) {
+      mq.addEventListener('change', function (e) {
+        self.setReduceMotion(e.matches);
+        self.say(e.matches ? '已按系统设置减少动效：只有你放才动' : '恢复自动放烟花');
+      });
+    }
+  };
+
+  /** 把媒体查询结果转成面板上的说明（读屏之外也让人知道为什么"不动"）。 */
+  FW.app.App.prototype.motionNote = function () {
+    var el = $('motion-note');
+    if (!el) return;
+    el.hidden = !this.reduceMotion;
+    if (this.reduceMotion) {
+      el.textContent = '系统开了「减少动效」：不自动放，按 R 或点画面才放。';
+    }
+  };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/ebml.js ===================== */
@@ -1921,15 +2038,26 @@ setTimeout(function () {
     return this.rec ? (Date.now() - this.startedAt) / 1000 : 0;
   };
 
-  Recorder.prototype.start = function () {
+  /**
+   * 开始录。o.audio 是音效那一路 MediaStream（音效开着时给，没开就是 null）——
+   * 有音轨就一起录进去，播放器里就是有声的。
+   */
+  Recorder.prototype.start = function (o) {
+    o = o || {};
     if (this.rec || !supported()) return false;
     var stream = this.canvas.captureStream(this.fps);
+    this.hasAudio = false;
+    if (o.audio) {
+      var at = o.audio.getAudioTracks ? o.audio.getAudioTracks() : [];
+      for (var i = 0; i < at.length; i++) { stream.addTrack(at[i]); this.hasAudio = true; }
+    }
     var mime = pickMime();
     var size = captureSize(this.canvas, stream);
     this.width = size.w;
     this.height = size.h;
     this.bitsPerSecond = bitrateFor(size.w, size.h, this.fps);
     var opts = { videoBitsPerSecond: this.bitsPerSecond };
+    if (this.hasAudio) opts.audioBitsPerSecond = 128000;
     if (mime) opts.mimeType = mime;
     this.chunks = [];
     this.rec = new MediaRecorder(stream, opts);
@@ -1939,6 +2067,7 @@ setTimeout(function () {
     this.startedAt = Date.now();
     console.log('录制 ' + size.w + '×' + size.h + ' @' + this.fps + 'fps · 目标 '
       + (this.bitsPerSecond / 1e6).toFixed(1) + ' Mbps'
+      + (this.hasAudio ? ' · 128 kbps 音效' : ' · 无声')
       + (mime ? ' · ' + mime.replace('video/webm;codecs=', '') : ''));
     if (this.maxSeconds > 0) {
       this.timer = setTimeout(function () {
@@ -2094,6 +2223,203 @@ setTimeout(function () {
                  readText: readText, chunks: chunks };
 })(globalThis.FW || (globalThis.FW = {}));
 
+/* ===================== src/sound.js ===================== */
+/* ============================================================================
+ * sound.js —— 音效：Web Audio 现场合成，没有一个音频文件
+ * ---------------------------------------------------------------------------
+ * 三条硬约束：
+ *   1) 零素材 —— 单文件版不能有外部请求，所以发射是"滤波噪声扫频 + 一点啸叫"，
+ *      爆炸是"正弦下扫 + 噪声爆裂 + 几声噼啪"，全部现场合成（白噪声缓冲建一次反复用）。
+ *   2) 不能影响模拟 —— 音效只"听"模拟抛出的事件（Show.onEvent），自己不碰 rng、
+ *      不改任何状态，所以同一个种子照样放出同一场（render_smoke 会断言这一点）。
+ *   3) 不能自动出声 —— 浏览器要求用户手势之后才允许播音频，所以 AudioContext 是
+ *      懒创建的：第一次点击/按键时才建、必要时 resume()。开关记在 fw.sound。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  function supported() {
+    return typeof window !== 'undefined'
+        && !!(window.AudioContext || window.webkitAudioContext);
+  }
+
+  /** 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。 */
+  var TOKENS_MAX = 6, TOKENS_PER_SEC = 6;
+
+  function Engine(o) {
+    o = o || {};
+    this.level = (o.level === undefined) ? 0.2 : o.level;
+    this.enabled = o.enabled !== false;
+    this.ctx = null;
+    this.comp = null;
+    this.master = null;
+    this.mix = null;                 // 录制用的音频输出（MediaStreamDestination）
+    this.buf = null;                 // 复用的白噪声
+    this.tokens = TOKENS_MAX;
+    this.refillAt = 0;
+    this.launches = 0;
+    this.bursts = 0;
+    this.dropped = 0;
+  }
+
+  /** 建（或取）音频上下文。必须在用户手势里第一次调用。 */
+  Engine.prototype.ensure = function () {
+    if (this.ctx) return this.ctx;
+    if (!supported()) return null;
+    var C = window.AudioContext || window.webkitAudioContext;
+    var ctx = new C();
+    this.comp = ctx.createDynamicsCompressor();     // 收一下峰值，别爆音
+    this.comp.threshold.value = -14;
+    this.comp.ratio.value = 8;
+    this.master = ctx.createGain();
+    this.master.gain.value = this.enabled ? this.level : 0;
+    this.comp.connect(this.master);
+    this.master.connect(ctx.destination);
+    if (ctx.createMediaStreamDestination) {
+      this.mix = ctx.createMediaStreamDestination();
+      this.master.connect(this.mix);
+    }
+    this.ctx = ctx;
+    return ctx;
+  };
+
+  /** 用户手势里调一下（Safari 上上下文会先是 suspended）。 */
+  Engine.prototype.resume = function () {
+    var ctx = this.ctx;
+    if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume();
+  };
+
+  Engine.prototype.setEnabled = function (on) {
+    this.enabled = !!on;
+    if (this.master) {
+      this.master.gain.value = this.enabled ? this.level : 0;   // 直接静音，不拆节点
+    }
+    return this.enabled;
+  };
+
+  /** 录制时要接进来的音轨（没建上下文 / 没有这个能力就返回 null）。 */
+  Engine.prototype.stream = function () {
+    return (this.mix && this.enabled) ? this.mix.stream : null;
+  };
+
+  Engine.prototype.stats = function () {
+    return { launches: this.launches, bursts: this.bursts, dropped: this.dropped,
+             enabled: this.enabled, context: this.ctx ? this.ctx.state : 'none' };
+  };
+
+  /* ------------------------------------------------------------- 合成小件 */
+
+  /** 白噪声（1 秒，够所有效果用了；噪声源都 loop 它）。 */
+  Engine.prototype.noise = function (ctx) {
+    if (this.buf) return this.buf;
+    var n = Math.floor(ctx.sampleRate * 1.0);
+    var buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    this.buf = buf;
+    return buf;
+  };
+
+  /** 名额：齐射时先到先得，超了就丢（记在 dropped 里，测试能看见）。 */
+  Engine.prototype.spend = function () {
+    var now = this.ctx ? this.ctx.currentTime : 0;
+    if (now > this.refillAt) {
+      this.refillAt = now + 1 / TOKENS_PER_SEC;
+      if (this.tokens < TOKENS_MAX) this.tokens++;
+    }
+    if (this.tokens <= 0) { this.dropped++; return false; }
+    this.tokens--;
+    return true;
+  };
+
+  /** 一小段带包络的噪声：滤波类型/频率/时长/音量由调用者给。 */
+  Engine.prototype.noiseHit = function (ctx, t, o) {
+    var src = ctx.createBufferSource();
+    src.buffer = this.noise(ctx);
+    src.loop = true;
+    var f = ctx.createBiquadFilter();
+    f.type = o.type || 'bandpass';
+    f.Q.value = o.q === undefined ? 1.2 : o.q;
+    f.frequency.setValueAtTime(o.from, t);
+    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + o.dur);
+    var g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.012));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    src.connect(f); f.connect(g); g.connect(this.comp);
+    src.start(t);
+    src.stop(t + o.dur + 0.02);
+    return g;
+  };
+
+  /* ----------------------------------------------------------------- 两种声 */
+
+  /**
+   * 发射：噪声从低扫到高（"咻"）。
+   * 注意这里是读 `this.ctx` 而**不是** ensure()：上下文只允许在用户手势里创建，
+   * 否则 Chromium 会拦下来（控制台抱怨 "AudioContext was not allowed to start"）
+   * 并让上下文停在 suspended。没上下文就安静 —— 用户一动手（点画面/按 R/点开关）
+   * 才会建，之后自动放的那些也就有声音了。
+   */
+  Engine.prototype.launch = function () {
+    var ctx = this.ctx;
+    if (!ctx || !this.enabled || !this.spend()) return;
+    var t = ctx.currentTime + 0.01;
+    this.noiseHit(ctx, t, { type: 'bandpass', q: 1.6, from: 380, to: 1700,
+                            dur: 0.42, gain: 0.16, attack: 0.06 });
+    var o = ctx.createOscillator();                 // 一点啸叫，让它更像"上去"
+    var g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(620 * (1 + Math.random() * 0.1), t);
+    o.frequency.exponentialRampToValueAtTime(1250, t + 0.38);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.035, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    o.connect(g); g.connect(this.comp);
+    o.start(t); o.stop(t + 0.42);
+    this.launches++;
+  };
+
+  /**
+   * 爆炸：低频"咚" + 噪声爆裂 + 几声噼啪。音量/亮度跟着弹壳大小走
+   * （radius 越大越低沉），噼啪的位置用 Math.random —— 不是模拟的 rng。
+   */
+  Engine.prototype.burst = function (ev) {
+    var ctx = this.ctx;                                  // 同上：不在手势里就别建上下文
+    if (!ctx || !this.enabled || !this.spend()) return;
+    var t = ctx.currentTime + 0.01;
+    var big = Math.min(1, ((ev && ev.radius) || 150) / 260);       // 0 小 … 1 大
+    var o = ctx.createOscillator();
+    var g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(180 - 70 * big, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.30 + 0.22 * big, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    o.connect(g); g.connect(this.comp);
+    o.start(t); o.stop(t + 0.36);
+    this.noiseHit(ctx, t, { type: 'highpass', q: 0.7, from: 1800,
+                            dur: 0.16, gain: 0.20, attack: 0.004 });
+    var crackles = 5 + Math.floor(Math.random() * 4);
+    for (var i = 0; i < crackles; i++) {
+      this.noiseHit(ctx, t + 0.05 + Math.random() * 0.42, {
+        type: 'bandpass', q: 6, from: 2600 + Math.random() * 3200,
+        dur: 0.035, gain: 0.05, attack: 0.002 });
+    }
+    this.bursts++;
+  };
+
+  /** 模拟抛出来的事件转成声音（事件本身来自 show.js / firework.js）。 */
+  Engine.prototype.event = function (ev) {
+    if (!ev) return;
+    if (ev.type === 'launch') this.launch();
+    else if (ev.type === 'burst') this.burst(ev);
+  };
+
+  FW.sound = { Engine: Engine, supported: supported };
+})(globalThis.FW || (globalThis.FW = {}));
+
 /* ===================== src/actions.js ===================== */
 /* ============================================================================
  * actions.js —— 面板上那些"动作"：存图 / 分享链接 / 全屏 / 录制
@@ -2109,6 +2435,46 @@ setTimeout(function () {
 
   function $(id) { return document.getElementById(id); }
 
+  /* ---------------------------------------------------------------- 音效 */
+
+  /**
+   * 音效开关（存 fw.sound）。关掉只是把主增益拉到 0，不拆音频节点 ——
+   * 再打开是瞬时的，也不会因为反复建 AudioContext 触发浏览器的数量上限。
+   */
+  FW.app.App.prototype.setSound = function (on) {
+    if (!this.sound) return false;
+    var enabled = this.sound.setEnabled(on);
+    if (enabled) { this.sound.ensure(); this.sound.resume(); }
+    this.store.set('sound', enabled ? '1' : '0');
+    this.syncPanel();
+    return enabled;
+  };
+
+  /**
+   * 模拟抛出来的发射/爆炸事件 → 音效。
+   * 这个钩子是**只读**的：音效不碰 rng、不改任何状态，同一个种子照样放出同一场。
+   */
+  FW.app.App.prototype.onShowEvent = function (ev) {
+    if (this.sound) this.sound.event(ev);
+  };
+
+  /** 面板上的「声音」按钮：第一次点击本身就算"用户手势"，音频上下文在那时才建。 */
+  FW.app.App.prototype.bindSound = function () {
+    var self = this;
+    var snd = $('sound');
+    if (!snd) return;
+    if (!this.sound) {                       // 浏览器没有 Web Audio：按钮藏起来
+      snd.hidden = true;
+      return;
+    }
+    snd.addEventListener('click', function () {
+      // 第一次手势：先建上下文，再切开关（顺序反了 Safari 上会静音）
+      self.gesture();
+      var on = self.setSound(!self.sound.enabled);
+      self.say(on ? '音效已开' : '音效已关');
+    });
+  };
+
   /* ------------------------------------------------------- 分享 / 全屏 */
 
   /** 复制这一场的链接；成功与否都直接写在按钮上（两秒后恢复）。 */
@@ -2120,7 +2486,9 @@ setTimeout(function () {
       btn.textContent = ok ? '已复制' : '复制失败';
       setTimeout(function () { btn.textContent = old; }, 1500);
       if (ok) console.log('这一场的链接：' + url);
+      self.say(ok ? '链接已复制' : '链接复制失败');
     }
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(function () { done(true); },
                                              function () { done(fallback(url)); });
@@ -2140,7 +2508,6 @@ setTimeout(function () {
         return ok;
       } catch (e) { return false; }
     }
-    void self;
   };
 
   FW.app.App.prototype.toggleFullscreen = function (btn) {
@@ -2171,7 +2538,9 @@ setTimeout(function () {
     if (!this.recorder) {
       this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
     }
-    if (!this.recorder.start()) return;
+    // 音效开着的话，把合成出来的那一路也录进去（没音频文件，所以不会有加载延迟）
+    this.gesture();                    // 在这一次点击（手势）里把音频上下文建起来
+    this.recorder.start({ audio: this.sound ? this.sound.stream() : null });
     var self = this;
     this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
     this.recUiWasHidden = this.hideUi;
@@ -2183,6 +2552,7 @@ setTimeout(function () {
       $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
     }, 100);
     console.log('开始录制（只录画布，不含界面）');
+    this.say('开始录制' + (this.sound && this.sound.enabled ? '（含音效）' : ''));
   };
 
   FW.app.App.prototype.stopRecord = function () {
@@ -2286,6 +2656,7 @@ setTimeout(function () {
     $('budget').value = this.maxGeos;
     $('budget-val').textContent = this.maxGeos;
     $('pause').textContent = this.paused ? '继续' : '暂停';
+    $('pause').setAttribute('aria-pressed', this.paused ? 'true' : 'false');
     // 「每日」是个开关：亮着 = 这一场会跟着日期自动换（每天零点后自己变成新的一天）
     var d = $('daily');
     if (d) {
@@ -2294,7 +2665,16 @@ setTimeout(function () {
         ? '今日这一场（已开启：跨日会自己换成新的一天）'
         : '回到今天这一场，并跟着日期自动更新';
     }
+    // 「声音」也是开关：亮着 = 有音效（首次点击/按键之后才真的出声，见 sound.js）
+    var s = $('sound');
+    if (s && this.sound) {
+      s.setAttribute('aria-pressed', this.sound.enabled ? 'true' : 'false');
+      s.title = this.sound.enabled
+        ? (FW.sound.supported() ? '音效已开（现场合成，没有音频文件）' : '这个浏览器不支持 Web Audio')
+        : '音效已关';
+    }
     document.title = '烟花 · Fireworks · seed ' + this.seed;
+    this.motionNote();
     this.applyUiVisibility();
     this.hud();
   };
@@ -2359,6 +2739,7 @@ setTimeout(function () {
         self.interlude();
         lastValid = this.value;                   // 框里已被刷回数字种子
         console.log('%c插播：参考图风格的两发', 'color:#ffd34d;font-weight:700');
+        self.say('插播：参考图风格的两发');
       }
     });
 
@@ -2372,29 +2753,42 @@ setTimeout(function () {
 
     // 数字种子在失焦 / 回车时生效（免得每敲一位就重开一场）
     input.addEventListener('change', function () {
-      if (/^\d+$/.test(this.value)) self.rebuild(this.value, false);   // 敲数字 = 钉住这一场
-      else if (this.value === '') self.reseed();
+      if (/^\d+$/.test(this.value)) {
+        self.rebuild(this.value, false);                 // 敲数字 = 钉住这一场
+        self.say('换到 seed ' + self.seed);
+      } else if (this.value === '') self.reseed();
     });
   };
 
   FW.app.App.prototype.bindPanel = function () {
     var self = this;
     this.bindSeedInput();
-    $('dice-number').addEventListener('click', function () { self.reseed(); });
-    $('pause').addEventListener('click', function () { self.togglePause(); });
-    $('extra').addEventListener('click', function () { self.extra(); });
-    $('replay').addEventListener('click', function () { self.rebuild(self.seed); });
+    $('dice-number').addEventListener('click', function () {
+      self.reseed();
+      self.say('随机换一场，seed ' + self.seed);
+    });
+    $('pause').addEventListener('click', function () { self.pauseAndSay(); });
+    $('extra').addEventListener('click', function () { self.gesture(); self.extra(); });
+    $('replay').addEventListener('click', function () {
+      self.rebuild(self.seed);
+      self.say('从头再放一遍');
+    });
     $('save').addEventListener('click', function () { self.savePng(); });
     $('hide').addEventListener('click', function () { self.toggleUi(); });
     $('record').addEventListener('click', function () { self.toggleRecord(); });
     $('rec-stop').addEventListener('click', function () { self.stopRecord(); });
+    this.bindSound();
     // 点/触摸画面：在那里炸一发；顺便把焦点从种子框收回（R 之类立刻恢复）
     this.canvas.addEventListener('pointerdown', function (e) {
+      self.gesture();
       var el = document.activeElement;
       if (el && el.id === 'seed') el.blur();
       self.launchAt(e.clientX, e.clientY);
     });
-    $('daily').addEventListener('click', function () { self.daily(); });
+    $('daily').addEventListener('click', function () {
+      self.daily();
+      self.say('换到今天的这一场，seed ' + self.seed + '（会跟着日期自动更新）');
+    });
     $('share').addEventListener('click', function () { self.copyLink(this); });
     $('fullscreen').addEventListener('click', function () { self.toggleFullscreen(this); });
     $('show').addEventListener('click', function () { self.toggleUi(); });
@@ -2422,8 +2816,8 @@ setTimeout(function () {
         || (tag === 'input'
             && /^(text|number|search|email|url|password|tel)$/.test(el.type || 'text'));
       if (typing) return;
-      if (e.code === 'Space') { e.preventDefault(); self.togglePause(); }
-      else if (e.key === 'r' || e.key === 'R') self.extra();
+      if (e.code === 'Space') { e.preventDefault(); self.pauseAndSay(); }
+      else if (e.key === 'r' || e.key === 'R') { self.gesture(); self.extra(); }
     });
   };
 
@@ -2445,7 +2839,7 @@ setTimeout(function () {
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记两个键：上次的种子，和"每日"这个开关（隐私模式下会抛错，所以都包起来）。 */
+  /** localStorage 里记三个键：上次的种子 / "每日"开关 / "声音"开关（隐私模式下会抛错，都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
@@ -2453,15 +2847,32 @@ setTimeout(function () {
     };
   }
 
+  /** 音效引擎：只在浏览器支持时建；开关状态来自上次的选择（默认开）。 */
+  function soundEngine(st) {
+    if (!FW.sound || !FW.sound.supported()) return null;
+    return new FW.sound.Engine({ enabled: st.get('sound') !== '0' });
+  }
+
   function boot() {
+    var st = store();
+    var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
     var inst = new FW.app.App({
       canvas: $('stage'),
       search: new URLSearchParams(location.search),
-      store: store()
+      store: st,
+      sound: soundEngine(st),                  // 音效引擎要在 bindPanel 之前就位
+      reducedMotion: !!(mq && mq.matches)
     });
     FW.app.instance = inst;
+    if (mq) inst.bindReducedMotion(mq);
     inst.start();
+    inst.syncPanel();                    // 声音开关的 aria 状态要一开始就对
     consoleNote(inst);
+    // 只在用户动作之后才播报（读屏用户一进来不该听一串状态）
+    if (inst.reduceMotion) {
+      console.log('系统设置：减少动效 —— 不自动放，只有手动才动');
+      inst.say('已按系统设置减少动效：只有你按 R 或点画面才放');
+    }
   }
 
   if (document.readyState === 'loading') {

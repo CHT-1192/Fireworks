@@ -80,15 +80,26 @@
     return this.rec ? (Date.now() - this.startedAt) / 1000 : 0;
   };
 
-  Recorder.prototype.start = function () {
+  /**
+   * 开始录。o.audio 是音效那一路 MediaStream（音效开着时给，没开就是 null）——
+   * 有音轨就一起录进去，播放器里就是有声的。
+   */
+  Recorder.prototype.start = function (o) {
+    o = o || {};
     if (this.rec || !supported()) return false;
     var stream = this.canvas.captureStream(this.fps);
+    this.hasAudio = false;
+    if (o.audio) {
+      var at = o.audio.getAudioTracks ? o.audio.getAudioTracks() : [];
+      for (var i = 0; i < at.length; i++) { stream.addTrack(at[i]); this.hasAudio = true; }
+    }
     var mime = pickMime();
     var size = captureSize(this.canvas, stream);
     this.width = size.w;
     this.height = size.h;
     this.bitsPerSecond = bitrateFor(size.w, size.h, this.fps);
     var opts = { videoBitsPerSecond: this.bitsPerSecond };
+    if (this.hasAudio) opts.audioBitsPerSecond = 128000;
     if (mime) opts.mimeType = mime;
     this.chunks = [];
     this.rec = new MediaRecorder(stream, opts);
@@ -98,6 +109,7 @@
     this.startedAt = Date.now();
     console.log('录制 ' + size.w + '×' + size.h + ' @' + this.fps + 'fps · 目标 '
       + (this.bitsPerSecond / 1e6).toFixed(1) + ' Mbps'
+      + (this.hasAudio ? ' · 128 kbps 音效' : ' · 无声')
       + (mime ? ' · ' + mime.replace('video/webm;codecs=', '') : ''));
     if (this.maxSeconds > 0) {
       this.timer = setTimeout(function () {

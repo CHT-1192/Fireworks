@@ -40,7 +40,7 @@
   }
 
   /**
-   * opts = { canvas, search, store }
+   * opts = { canvas, search, store, sound, reducedMotion }
    *   store 是 { get(key), set(key, value) } —— 由 ui.js 用 localStorage 实现，
    *   app.js 自己不碰 DOM/存储（这样主循环在 Node 里也能测）。
    * 存储里两个键：`seed` = 这一场的数字种子，`daily` = '1' 表示这一场跟着日期走。
@@ -50,6 +50,7 @@
     var q = opts.search;
     this.canvas = opts.canvas;
     this.store = opts.store || { get: function () { return null; }, set: function () {} };
+    this.sound = opts.sound || null;      // 音效引擎由 ui.js 建好传进来（没有就是没有）
     this.renderer = new FW.view.Renderer(this.canvas, 2);
 
     // 种子的来源顺序：URL -> "每日"这个模式 -> 上次用过的 -> 今天这一场。都只认数字；
@@ -80,6 +81,8 @@
     else if (q.get('still') === '1' || q.get('still') === '') this.freezeFrames = 1;
     else this.freezeFrames = null;
     this.hideUi = (q.get('ui') === '0');   // ?ui=0 开局就收起控制台（截图 / 嵌入用）
+    // 系统开了"减少动效"：不自动排烟花，且每发小一号（只有你按 R / 点画面才放）
+    this.reduceMotion = !!opts.reducedMotion;
 
     this.paused = false;
     this.crashed = false;
@@ -110,8 +113,17 @@
   App.prototype.bindKeys = function () {};
   App.prototype.onError = function (err) { console.error(err); };
   App.prototype.onDayRoll = function () {};      // "每日"跨日自动换场后通知 UI
+  App.prototype.onShowEvent = function () {};    // 发射/爆炸事件（音效等），只读
 
   /* ------------------------------------------------------------ 构建 / 重开 */
+
+  /** 系统"减少动效"（UI 层随时可调）：关掉自动排烟花，并把每发压低一号。 */
+  App.prototype.setReduceMotion = function (on) {
+    this.reduceMotion = !!on;
+    this.show.auto = !this.reduceMotion;
+    this.show.motionScale = this.reduceMotion ? 0.55 : 1.0;
+    return this.reduceMotion;
+  };
 
   App.prototype.build = function () {
     var cw = this.canvas.clientWidth || this.canvas.width || 1;
@@ -121,6 +133,8 @@
     else { lw = cw; lh = ch; }
     this.show = new FW.show.Show(lw, lh, new FW.rng.Random(this.seed),
                                  { maxGeos: this.maxGeos });
+    this.show.onEvent = this.onShowEvent.bind(this);   // 事件钩子（音效），只读
+    this.setReduceMotion(this.reduceMotion);
     FW.show.build(this.show);
     this.acc = 0.0;
     if (this.freezeFrames !== null) {

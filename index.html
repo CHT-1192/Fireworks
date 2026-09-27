@@ -48,7 +48,17 @@
     color: #ffd98a;
   }
   input:focus, select:focus { border-color: rgba(255, 211, 77, .6); }
-  button:focus-visible { border-color: rgba(255, 211, 77, .6); }
+  /* 键盘焦点要看得见（只用 :focus-visible，鼠标点击不画框） */
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid #ffd34d; outline-offset: 1px; border-color: rgba(255, 211, 77, .6);
+  }
+  /* 读屏用：视觉上藏起来，但仍然会被朗读 */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+    border: 0;
+  }
+  #motion-note { margin: 0; font-size: 10.5px; line-height: 1.5; color: #ffd98a; }
 
   /* 种子：文本 + 两个小按钮，一行放下（标签不换行、输入框可压缩） */
   .seedrow { display: flex; align-items: center; gap: 6px; }
@@ -69,7 +79,7 @@
   .row > * { flex: 1; }
   .row.primary button { padding: 8px 9px; font-size: 12.5px; }
   /* 次要动作挤成一格一格，别和主操作一样重 */
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 
   .budgetrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
                color: rgba(178, 198, 255, .6); white-space: nowrap; }
@@ -120,16 +130,24 @@
   @media (max-width: 520px) {
     #hud { display: none; }             /* 手机：画面优先 */
   }
+
+  /* 系统开了"减少动效"：连 CSS 的过渡/抖动动画也一起关掉（JS 那边见 src/a11y.js） */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+    }
+  }
 </style>
 </head>
 <body>
-<canvas id="stage"></canvas>
+<canvas id="stage" role="img" aria-label="程序化烟花秀的画面（纯装饰，操作都在左侧控制台）"></canvas>
 
-<aside id="panel">
+<aside id="panel" aria-label="控制台">
   <h1>烟花 · Fireworks</h1>
 
   <div class="seedrow">
-    <span class="lab">种子</span>
+    <label class="lab" for="seed">种子</label>
     <input id="seed" type="text" maxlength="16" autocomplete="off" spellcheck="false">
     <button id="dice-number" class="mini" title="随机换一个数字种子">随机</button>
     <button id="daily" class="mini" aria-pressed="false"
@@ -138,8 +156,8 @@
   <p class="help">配色、花型、位置全随机</p>
 
   <div class="row primary">
-    <button id="pause">暂停</button>
-    <button id="extra" title="快捷键 R；点画面则在那个位置炸">放一发</button>
+    <button id="pause" aria-pressed="false" aria-keyshortcuts="Space">暂停</button>
+    <button id="extra" aria-keyshortcuts="R" title="快捷键 R；点画面则在那个位置炸">放一发</button>
   </div>
 
   <div class="grid">
@@ -149,10 +167,14 @@
     <button id="record" class="mini" title="录成 WebM（只录画布，元数据里写种子）">录制</button>
     <button id="fullscreen" class="mini" title="全屏（Esc 退出）">全屏</button>
     <button id="hide" class="mini" title="收起面板（Esc）">收起</button>
+    <button id="sound" class="mini" aria-pressed="false"
+            title="音效开关（现场合成，没有音频文件）">声音</button>
   </div>
 
+  <p id="motion-note" hidden></p>
+
   <div class="budgetrow">
-    <span>绘制预算</span>
+    <label for="budget">绘制预算</label>
     <input id="budget" type="range" min="80" max="1500" step="20">
     <b id="budget-val">450</b>
   </div>
@@ -160,11 +182,13 @@
   <p class="hint">空格 暂停 · R 放一发 · Esc 收起 · 点画面 = 在那里炸一发</p>
 </aside>
 
+<p id="a11y-status" class="sr-only" role="status" aria-live="polite"></p>
+
 <button id="show" hidden>控制台</button>
 
-<div id="rec" hidden><b>录制中</b><span id="rec-time">0.0s</span><button id="rec-stop">停止</button></div>
+<div id="rec" hidden aria-hidden="true"><b>录制中</b><span id="rec-time">0.0s</span><button id="rec-stop">停止</button></div>
 
-<div id="hud">
+<div id="hud" aria-hidden="true">
   <div class="line">
     <span class="k">seed</span><b id="hud-seed">–</b>
     <span class="k">时刻</span><b id="hud-time">–</b>

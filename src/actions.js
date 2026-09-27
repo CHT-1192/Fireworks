@@ -12,6 +12,46 @@
 
   function $(id) { return document.getElementById(id); }
 
+  /* ---------------------------------------------------------------- 音效 */
+
+  /**
+   * 音效开关（存 fw.sound）。关掉只是把主增益拉到 0，不拆音频节点 ——
+   * 再打开是瞬时的，也不会因为反复建 AudioContext 触发浏览器的数量上限。
+   */
+  FW.app.App.prototype.setSound = function (on) {
+    if (!this.sound) return false;
+    var enabled = this.sound.setEnabled(on);
+    if (enabled) { this.sound.ensure(); this.sound.resume(); }
+    this.store.set('sound', enabled ? '1' : '0');
+    this.syncPanel();
+    return enabled;
+  };
+
+  /**
+   * 模拟抛出来的发射/爆炸事件 → 音效。
+   * 这个钩子是**只读**的：音效不碰 rng、不改任何状态，同一个种子照样放出同一场。
+   */
+  FW.app.App.prototype.onShowEvent = function (ev) {
+    if (this.sound) this.sound.event(ev);
+  };
+
+  /** 面板上的「声音」按钮：第一次点击本身就算"用户手势"，音频上下文在那时才建。 */
+  FW.app.App.prototype.bindSound = function () {
+    var self = this;
+    var snd = $('sound');
+    if (!snd) return;
+    if (!this.sound) {                       // 浏览器没有 Web Audio：按钮藏起来
+      snd.hidden = true;
+      return;
+    }
+    snd.addEventListener('click', function () {
+      // 第一次手势：先建上下文，再切开关（顺序反了 Safari 上会静音）
+      self.gesture();
+      var on = self.setSound(!self.sound.enabled);
+      self.say(on ? '音效已开' : '音效已关');
+    });
+  };
+
   /* ------------------------------------------------------- 分享 / 全屏 */
 
   /** 复制这一场的链接；成功与否都直接写在按钮上（两秒后恢复）。 */
@@ -23,7 +63,9 @@
       btn.textContent = ok ? '已复制' : '复制失败';
       setTimeout(function () { btn.textContent = old; }, 1500);
       if (ok) console.log('这一场的链接：' + url);
+      self.say(ok ? '链接已复制' : '链接复制失败');
     }
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(function () { done(true); },
                                              function () { done(fallback(url)); });
@@ -43,7 +85,6 @@
         return ok;
       } catch (e) { return false; }
     }
-    void self;
   };
 
   FW.app.App.prototype.toggleFullscreen = function (btn) {
@@ -74,7 +115,9 @@
     if (!this.recorder) {
       this.recorder = new FW.record.Recorder(this.canvas, { fps: 60, maxSeconds: 30 });
     }
-    if (!this.recorder.start()) return;
+    // 音效开着的话，把合成出来的那一路也录进去（没音频文件，所以不会有加载延迟）
+    this.gesture();                    // 在这一次点击（手势）里把音频上下文建起来
+    this.recorder.start({ audio: this.sound ? this.sound.stream() : null });
     var self = this;
     this.recorder.onAutoStop = function () { self.stopRecord(); };   // 录满 30 秒自动收
     this.recUiWasHidden = this.hideUi;
@@ -86,6 +129,7 @@
       $('rec-time').textContent = self.recorder.elapsed().toFixed(1) + 's';
     }, 100);
     console.log('开始录制（只录画布，不含界面）');
+    this.say('开始录制' + (this.sound && this.sound.enabled ? '（含音效）' : ''));
   };
 
   FW.app.App.prototype.stopRecord = function () {

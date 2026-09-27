@@ -53,6 +53,9 @@
     this.burstAge = 0.0;                    // 爆开之后过了多久（只用来卡爆心碎屑的窗口）
     this.count = (o.count === undefined) ? null : o.count;
     this.radius = (o.radius === undefined) ? null : o.radius;
+    // 事件钩子（音效等 UI 层用）：**只读**，不消耗 rng、不改状态，
+    // 所以同一个种子照样是同一场（render_smoke 里有断言）
+    if (show.onEvent) show.onEvent({ type: 'launch', style: style, x: this.x0, y: this.y0 });
   }
 
   /* ---------------------------------------------------------------- 上升 */
@@ -115,6 +118,11 @@
     var drag = spec.drag;
     var cx = this.x, cy = this.y;
     this.show.add(new el.Flash(this.show, cx, cy, pal, rng.uniform(26, 40)));
+    // 同上：音效等 UI 层挂钩，只读不写，不影响这一场
+    if (this.show.onEvent) {
+      this.show.onEvent({ type: 'burst', style: this.style, x: cx, y: cy,
+                          radius: rmax, count: count });
+    }
 
     var start = rng.uniform(0, 360);
     var sector = 360.0 / count;

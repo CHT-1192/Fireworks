@@ -11,9 +11,11 @@
     "show.js",
     "view.js",
     "app.js",
+    "a11y.js",
     "ebml.js",
     "record.js",
     "pngmeta.js",
+    "sound.js",
     "actions.js",
     "ui.js"
   ]
