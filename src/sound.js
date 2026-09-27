@@ -54,9 +54,12 @@
     }
     var ctx = this.ctx;
     if (this.comp) return ctx;                        // 图已经搭好了
-    this.comp = ctx.createDynamicsCompressor();        // 收一下峰值，别爆音
-    this.comp.threshold.value = -14;
-    this.comp.ratio.value = 8;
+    // 只当安全网：阈值放宽 + 温和比率。压得太狠会把瞬态（脆响）连同低频一起压掉，
+    // 听感就"闷"了 —— 各层的电平本身要留够余量，不能指望它来收。
+    this.comp = ctx.createDynamicsCompressor();
+    this.comp.threshold.value = -8;
+    this.comp.knee.value = 6;
+    this.comp.ratio.value = 4;
     this.master = ctx.createGain();
     this.master.gain.value = this.enabled ? this.level : 0;
     // 低通 17kHz：真实录音的顶上是滚降的，白噪声一路到 24k 听着会"太嘶"
@@ -222,32 +225,63 @@
   };
 
   /**
-   * 爆炸：低频"咚" + 噪声爆裂 + 几声噼啪。音量/亮度跟着弹壳大小走
-   * （radius 越大越低沉），噼啪的位置用 Math.random —— 不是模拟的 rng。
+   * 爆炸：**一记脉冲 + 中高脆响 + 低频闷响**（对着一真实爆炸录音量出来的形状，
+   * 见 tools/sound_shot.js --ref）。
+   *
+   *   参考（中等偏脆）：起音 0ms（脉冲，频谱是一根竖线）；+0.03s 2-8k 占 53%（脆响）；
+   *   +0.08s 0-0.5k 53%、+0.3s 95%（低频接管并拖尾）；衰减约 −70dB/s，0.9s 收干净。
+   *   现在（crisp=0.58）量出来：脉冲处低频 45% / 4-8k 28% / 2-4k 12%（参考 39/29/14），
+   *   +0.08s 低频 58%（参考 53%），+0.3s 85%（参考 94%）——形状对上了。
+   *
+   * 踩过的坑：DynamicsCompressor 压太狠（阈值 −14dB、比率 8）会把脆响的瞬态连同低频
+   * 一起压掉，听感立刻"闷"；现在阈值 −8dB、比率 4，各层电平自己留余量，它只当安全网。
+   *
+   * crisp 决定"脆/闷"（0 闷 … 1 脆），由弹壳大小 + 一点随机决定：
+   *   脆 → 高通噪声的"啪"更响更亮、正弦下扫起点更高、尾巴更短；
+   *   闷 → 低频身体更重、尾巴更长、脆响更少。
+   * 参考那段属于中等偏脆，所以默认值取 0.58。
    */
   Engine.prototype.burst = function (ev) {
     var ctx = this.ctx;                                  // 同上：不在手势里就别建上下文
     if (!ctx || !this.enabled) return;
     var t = ctx.currentTime + 0.01;
     var k = this.gainFactor();                           // 齐射时压小，但不丢
-    var big = Math.min(1, ((ev && ev.radius) || 150) / 260);       // 0 小 … 1 大
+    // 脆/闷：壳大偏闷，另外每发都有点不同（真实爆炸声本来就不一样）
+    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp : 0.58 + (Math.random() - 0.5) * 0.36;
+    if (ev && ev.radius) crisp += (200 - ev.radius) / 900;      // 半径大 → 更闷
+    crisp = Math.max(0.12, Math.min(0.95, crisp));
+
+    // 1) 脉冲 + 脆响：1ms 起音的高通噪声（频谱上是那根竖线），脆则更亮更响
+    this.noiseHit(ctx, t, { type: 'bandpass', q: 0.6, from: 3000,
+                            dur: 0.026, gain: 0.34 * k, attack: 0.001, end: 0.0003 });
+    this.noiseHit(ctx, t, { type: 'bandpass', q: 0.7,
+                            from: 3600 + 1400 * crisp,
+                            q: 1.0,
+                            dur: 0.36 + 0.18 * (1 - crisp),
+                            gain: (0.30 + 0.12 * crisp) * k, attack: 0.004, end: 0.0011 });
+    // 2) 低频身体：正弦下扫（大鼓那一下）
     var o = ctx.createOscillator();
     var g = ctx.createGain();
     o.type = 'sine';
-    o.frequency.setValueAtTime(180 - 70 * big, t);
-    o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
+    o.frequency.setValueAtTime(126 - 40 * crisp, t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.26 + 0.18 * (1 - crisp));
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime((0.30 + 0.22 * big) * k, t + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+    g.gain.exponentialRampToValueAtTime((0.11 + 0.045 * (1 - crisp)) * k, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.50 + 0.24 * (1 - crisp));
     o.connect(g); g.connect(this.comp);
-    o.start(t); o.stop(t + 0.36);
-    this.noiseHit(ctx, t, { type: 'highpass', q: 0.7, from: 1800,
-                            dur: 0.16, gain: 0.20 * k, attack: 0.004 });
-    var crackles = 5 + Math.floor(Math.random() * 4);
+    o.start(t); o.stop(t + 0.5);
+    // 3) 低频轰隆：0.5kHz 以下的尾巴（参考里 +0.3s 时它占 95%）
+    this.noiseHit(ctx, t, { type: 'lowpass', q: 0.7,
+                            from: 430 - 130 * crisp,
+                            dur: 1.05 + 0.45 * (1 - crisp),
+                            gain: (0.24 + 0.12 * (1 - crisp)) * k,
+                            attack: 0.008, end: 0.0003 });
+    // 4) 碎屑噼啪（轻）：脆的时候多两下
+    var crackles = 3 + Math.floor(Math.random() * (2 + 4 * crisp));
     for (var i = 0; i < crackles; i++) {
-      this.noiseHit(ctx, t + 0.05 + Math.random() * 0.42, {
-        type: 'bandpass', q: 6, from: 2600 + Math.random() * 3200,
-        dur: 0.035, gain: 0.05 * k, attack: 0.002 });
+      this.noiseHit(ctx, t + 0.03 + Math.random() * 0.22, {
+        type: 'bandpass', q: 5, from: 2200 + Math.random() * 3400,
+        dur: 0.035, gain: 0.040 * k, attack: 0.002 });
     }
     this.bursts++;
   };

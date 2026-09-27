@@ -25,7 +25,7 @@ const PORT = Number(process.env.PORT) || 9240;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 function parseArgs(argv) {
-  const a = { which: 'launch', out: null, ref: null, png: null, secs: 2.5 };
+  const a = { which: 'launch', out: null, ref: null, png: null, secs: 2.5, crisp: undefined };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--which') a.which = argv[++i];
@@ -33,6 +33,7 @@ function parseArgs(argv) {
     else if (k === '--ref') a.ref = argv[++i];
     else if (k === '--png') a.png = argv[++i];
     else if (k === '--secs') a.secs = Number(argv[++i]);
+    else if (k === '--crisp') a.crisp = Number(argv[++i]);
   }
   return a;
 }
@@ -108,7 +109,13 @@ function bands(x, rate, at) {
            parts: out.map((e, i) => [names[i], e / Math.max(tot, 1e-12)]) };
 }
 
-/** 一行行地报：起音、衰减斜率(τ)、−20/−40/−60dB 时刻、若干窗的频段分布 */
+/**
+ * 一行行地报：起音、衰减斜率(τ)、−20/−40/−60dB 时刻、包络、若干窗的频段分布与谱心。
+ *
+ * **时间原点用"起音"而不是"峰值"**：脉冲型声音（爆炸）的峰值位置会随参数在
+ * "脆响"和"低频身体"之间跳，拿峰值当基准会让两次测量的频段根本不在同一时刻
+ * —— 调参时被这个坑过一次。
+ */
 function analyze(label, x, rate) {
   const hop = Math.round(rate * 0.01);
   const env = [];
@@ -120,13 +127,15 @@ function analyze(label, x, rate) {
   const peak = Math.max(...env);
   if (!(peak > 1e-6)) { console.log(`${label}: 全是静音`); return; }
   const iPeak = env.indexOf(peak);
-  const t = (i) => i * 0.01;
-  const start = t(env.findIndex((v) => v > peak * 0.05));
-  const t90 = t(env.findIndex((v) => v > peak * 0.9));
-  // 衰减斜率：峰值之后到 −60dB 之间的点做最小二乘
+  const peakDb = db(peak);
+  const iStart = env.findIndex((v) => v > peak * 0.05);          // 起音
+  const t = (i) => (i - iStart) * 0.01;                          // 相对起音
+  const t90 = (env.findIndex((v) => v > peak * 0.9) - iStart) * 0.01;
+  const peakAt = t(iPeak);
+  // 衰减斜率：峰值之后到峰值 −60dB 之间的点做最小二乘
   const pts = [];
   for (let i = iPeak; i < env.length; i++) {
-    const v = db(env[i]);
+    const v = db(env[i]) - peakDb;
     if (v < -60) break;
     if (v < 0) pts.push([t(i), v]);
   }
@@ -135,23 +144,22 @@ function analyze(label, x, rate) {
   const sxx = pts.reduce((a, p) => a + p[0] * p[0], 0), sxy = pts.reduce((a, p) => a + p[0] * p[1], 0);
   const slope = (N * sxy - sx * sy) / (N * sxx - sx * sx);
   const b0 = (sy - slope * sx) / N;
-  const at = (d) => t(iPeak) + (d - db(env[iPeak])) / slope;
-  console.log(`${label}: ${(x.length / rate).toFixed(2)}s · 峰值 ${db(peak).toFixed(1)}dB @ ${t(iPeak).toFixed(2)}s`
-    + ` · 起音 ${start.toFixed(2)}s→90% ${t90.toFixed(3)}s（${((t90 - start) * 1000).toFixed(0)}ms）`);
+  const at = (rel) => ((rel - b0) / slope).toFixed(2);           // 相对峰值多少 dB 的时刻
+  console.log(`${label}: ${(x.length / rate).toFixed(2)}s · 峰值 ${peakDb.toFixed(1)}dB @ 起音+${peakAt.toFixed(2)}s`
+    + ` · 起音→90% ${(t90 * 1000).toFixed(0)}ms`);
   console.log(`   衰减 ${slope.toFixed(1)} dB/s（τ≈${(-8.686 / slope).toFixed(3)}s）`
-    + ` · −20dB @ ${at(-20).toFixed(2)}s · −40dB @ ${at(-40).toFixed(2)}s · −60dB @ ${at(-60).toFixed(2)}s`);
-  // 0.05s 一格的包络（相对峰值 dB，取 1.5s）：形状对不对一眼能看出来
+    + ` · −20dB @ 起音+${at(-20)}s · −40dB @ +${at(-40)}s · −60dB @ +${at(-60)}s`);
   const envRel = [];
   for (let k = 0; k < 30; k++) {
-    const i = iPeak + k * 5;                 // 每格 5 个 10ms 窗 = 0.05s
+    const i = iStart + k * 5;                                    // 每格 0.05s
     if (i >= env.length) break;
-    envRel.push((db(env[i]) - db(peak)).toFixed(0));
+    envRel.push((db(env[i]) - peakDb).toFixed(0));
   }
   console.log('   包络(0.05s/格, 相对峰值 dB, 1.5s): ' + envRel.join(' '));
-  for (const dt of [0, 0.15, 0.4, 0.8]) {
-    const b = bands(x, rate, t(iPeak) + dt);
+  for (const dt of [0, 0.03, 0.08, 0.15, 0.3, 0.6]) {            // 相对**起音**
+    const b = bands(x, rate, (iStart * 0.01) + dt);
     if (b.tot < 1e-12) continue;
-    console.log(`   @+${dt.toFixed(2)}s 谱心 ${b.cen.toFixed(0)}Hz · `
+    console.log(`   @起音+${dt.toFixed(2)}s 谱心 ${b.cen.toFixed(0)}Hz · `
       + b.parts.filter(([, f]) => f > 0.01).map(([n2, f]) => `${n2} ${(f * 100).toFixed(0)}%`).join(' '));
   }
 }
@@ -178,7 +186,7 @@ async function renderInPage(arg) {
   const eng = new FW.sound.Engine({ context: ctx, enabled: true });   // 用线上同档的电平（0.2）
   eng.ensure();
   if (arg.which === 'launch') eng.launch();
-  else eng.burst({ radius: 220, count: 30 });
+  else eng.burst({ radius: 200, count: 30, crisp: arg.crisp });
   const buf = await ctx.startRendering();
   const d = buf.getChannelData(0);
   const ab = new ArrayBuffer(44 + d.length * 2);
@@ -205,7 +213,7 @@ async function render(a) {
   const browser = await pw.launch();
   try {
     const { page, logs } = await pw.openPage(browser, BASE + '/?seed=7&still=1');
-    const b64 = await page.evaluate(renderInPage, { which: a.which, secs: a.secs });
+    const b64 = await page.evaluate(renderInPage, { which: a.which, secs: a.secs, crisp: a.crisp });
     if (logs.length) console.log('（页面日志：' + logs.join(' | ').slice(0, 120) + '）');
     return Buffer.from(b64, 'base64');
   } finally {
