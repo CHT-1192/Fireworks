@@ -611,6 +611,28 @@ async function checkA11y(browser) {
   await page.click('#sound');                          // 再打开，别影响后面的用例
   steps.push(`开关：关掉 -> ${off.stored}/增益 ${off.gain}，播报「${off.said}」`);
 
+  // E1b) 不丢音：手势之后收到的每个发射/爆炸事件都必须真的发了声（齐射时只压不丢）
+  await page.evaluate(() => {
+    const app = FW.app.instance;
+    window.__ev = { launch: 0, burst: 0 };
+    const orig = app.show.onEvent;
+    app.show.onEvent = function (ev) { window.__ev[ev.type]++; return orig.apply(this, arguments); };
+  });
+  const st0 = await page.evaluate(() => FW.app.instance.sound.stats());
+  await page.waitForTimeout(6000);
+  const noDrop = await page.evaluate(() => ({
+    ev: window.__ev,
+    stats: FW.app.instance.sound.stats()
+  }));
+  // 比较**增量**：stats 是从页面加载起累计的，不能直接跟事件数比
+  const played = (noDrop.stats.launches - st0.launches) + (noDrop.stats.bursts - st0.bursts);
+  const got = noDrop.ev.launch + noDrop.ev.burst;
+  if (!(got >= 3)) problems.push(`6 秒里只收到 ${got} 个发声事件，测不出丢音`);
+  else if (played !== got) {
+    problems.push(`有事件被丢音：事件 ${got}（${JSON.stringify(noDrop.ev)}）只发了 ${played} 声`);
+  }
+  steps.push(`不丢音：6 秒 ${got} 个事件 / ${played} 声（压小 ${noDrop.stats.squeezed} 次）`);
+
   // E2) 可访问性标记：地标、label、canvas 名字、播报区
   const mk = await page.evaluate(() => ({
     lang: document.documentElement.lang,

@@ -2243,8 +2243,13 @@ setTimeout(function () {
         && !!(window.AudioContext || window.webkitAudioContext);
   }
 
-  /** 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。 */
-  var TOKENS_MAX = 6, TOKENS_PER_SEC = 6;
+  /**
+   * 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。
+   * 注意是**只压不丢**：超预算的那一声仍然响，只是音量压到 SQUEEZED。
+   * 早先的版本直接丢音，实测 max=1500 时 30 秒丢掉 10/60 个事件 —— 听起来就是
+   * "怎么有时候跳过一些"。
+   */
+  var TOKENS_MAX = 8, TOKENS_PER_SEC = 8, SQUEEZED = 0.45;
 
   function Engine(o) {
     o = o || {};
@@ -2259,7 +2264,7 @@ setTimeout(function () {
     this.refillAt = 0;
     this.launches = 0;
     this.bursts = 0;
-    this.dropped = 0;
+    this.squeezed = 0;              // 因为超预算而被压小的次数（丢音次数恒为 0）
   }
 
   /**
@@ -2315,7 +2320,7 @@ setTimeout(function () {
   };
 
   Engine.prototype.stats = function () {
-    return { launches: this.launches, bursts: this.bursts, dropped: this.dropped,
+    return { launches: this.launches, bursts: this.bursts, squeezed: this.squeezed,
              enabled: this.enabled, context: this.ctx ? this.ctx.state : 'none' };
   };
 
@@ -2332,16 +2337,20 @@ setTimeout(function () {
     return buf;
   };
 
-  /** 名额：齐射时先到先得，超了就丢（记在 dropped 里，测试能看见）。 */
-  Engine.prototype.spend = function () {
+  /**
+   * 这一声该多响：预算够就是 1，超了压到 SQUEEZED（**不丢音**）。
+   * 齐射本来就该听着像"一声更大的"，而不是"漏掉几声"。
+   */
+  Engine.prototype.gainFactor = function () {
     var now = this.ctx ? this.ctx.currentTime : 0;
-    if (now > this.refillAt) {
+    if (now > this.refillAt) {                       // 按过去的时间补名额（不是每查一次补一个）
+      var add = Math.floor((now - this.refillAt) * TOKENS_PER_SEC) + 1;
+      this.tokens = Math.min(TOKENS_MAX, this.tokens + add);
       this.refillAt = now + 1 / TOKENS_PER_SEC;
-      if (this.tokens < TOKENS_MAX) this.tokens++;
     }
-    if (this.tokens <= 0) { this.dropped++; return false; }
-    this.tokens--;
-    return true;
+    if (this.tokens > 0) { this.tokens--; return 1; }
+    this.squeezed++;
+    return SQUEEZED;
   };
 
   /** 一小段带包络的噪声：滤波类型/频率/时长/音量由调用者给。 */
@@ -2416,23 +2425,24 @@ setTimeout(function () {
    */
   Engine.prototype.launch = function () {
     var ctx = this.ctx;
-    if (!ctx || !this.enabled || !this.spend()) return;
+    if (!ctx || !this.enabled) return;
     var t = ctx.currentTime + 0.005;
+    var k = this.gainFactor();                           // 齐射时压小，但不丢
     // A：一记宽带脆响，~0.15s 内消失（参考里 0.15s 之后就不亮了）
     this.noiseHit(ctx, t, { type: 'bandpass', q: 0.55, from: 5500,
-                            dur: 0.14, gain: 0.13, attack: 0.012, end: 0.00007 });
+                            dur: 0.14, gain: 0.13 * k, attack: 0.012, end: 0.00007 });
     // B1：中高频主体，留到 ~0.7s
     this.noiseHit(ctx, t, { type: 'highpass', q: 0.6, from: 3600,
-                            dur: 0.95, gain: 0.055, attack: 0.05, end: 0.00004 });
+                            dur: 0.95, gain: 0.055 * k, attack: 0.05, end: 0.00004 });
     // B2：长尾（0.4s 之后听到的主要是它）
     this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.7, from: 2400,
-                                    dur: 1.60, gain: 0.062, attack: 0.075, end: 0.00005 });
+                                    dur: 1.60, gain: 0.062 * k, attack: 0.075, end: 0.00005 });
     // C：一点低频体积
     this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.9, from: 700,
-                                    dur: 0.45, gain: 0.040, attack: 0.05, end: 0.00015 });
-    // 哨音：0.44s 才出现（跟参考一样），线性下滑，1.2s 前没入噪声
-    this.toneHit(ctx, t + 0.12, { from: 2906, to: 2438, dur: 0.66, gain: 0.019,
-                                  attack: 0.035, end: 0.0009,
+                                    dur: 0.45, gain: 0.040 * k, attack: 0.05, end: 0.00015 });
+    // 哨音：起音后 0.12s 出现（跟参考一样），线性下滑，之后没入噪声
+    this.toneHit(ctx, t + 0.12, { from: 2906, to: 2438, dur: 0.66, gain: 0.019 * k,
+                                  attack: 0.035, end: 0.0009 * k,
                                   wobble: { rate: 5.5, depth: 5 } });
     this.launches++;
   };
@@ -2443,8 +2453,9 @@ setTimeout(function () {
    */
   Engine.prototype.burst = function (ev) {
     var ctx = this.ctx;                                  // 同上：不在手势里就别建上下文
-    if (!ctx || !this.enabled || !this.spend()) return;
+    if (!ctx || !this.enabled) return;
     var t = ctx.currentTime + 0.01;
+    var k = this.gainFactor();                           // 齐射时压小，但不丢
     var big = Math.min(1, ((ev && ev.radius) || 150) / 260);       // 0 小 … 1 大
     var o = ctx.createOscillator();
     var g = ctx.createGain();
@@ -2452,17 +2463,17 @@ setTimeout(function () {
     o.frequency.setValueAtTime(180 - 70 * big, t);
     o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.30 + 0.22 * big, t + 0.015);
+    g.gain.exponentialRampToValueAtTime((0.30 + 0.22 * big) * k, t + 0.015);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
     o.connect(g); g.connect(this.comp);
     o.start(t); o.stop(t + 0.36);
     this.noiseHit(ctx, t, { type: 'highpass', q: 0.7, from: 1800,
-                            dur: 0.16, gain: 0.20, attack: 0.004 });
+                            dur: 0.16, gain: 0.20 * k, attack: 0.004 });
     var crackles = 5 + Math.floor(Math.random() * 4);
     for (var i = 0; i < crackles; i++) {
       this.noiseHit(ctx, t + 0.05 + Math.random() * 0.42, {
         type: 'bandpass', q: 6, from: 2600 + Math.random() * 3200,
-        dur: 0.035, gain: 0.05, attack: 0.002 });
+        dur: 0.035, gain: 0.05 * k, attack: 0.002 });
     }
     this.bursts++;
   };
