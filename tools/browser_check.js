@@ -331,7 +331,17 @@ async function checkRecord(browser) {
   const pillShown = !(await page.isHidden('#rec'));
   if (!panelHidden) problems.push('录制时面板没收起');
   if (!pillShown) problems.push('录制时没有停止条');
-  steps.push(`录制中：面板收起 ${panelHidden}、停止条 ${pillShown}`);
+  // 码率必须按像素自己算：默认值小得和分辨率无关，Retina 上抓到 2× 后备缓冲时
+  // 就成了 8×8 方块（旧版 1280×800 只有 1.5Mbps，2560×1600 更糊）
+  const rec = await page.evaluate(() => {
+    const r = FW.app.instance.recorder;
+    return { bps: r.bitsPerSecond || 0, w: r.width || 0, h: r.height || 0, fps: r.fps };
+  });
+  if (!(rec.bps >= rec.w * rec.h * rec.fps * 0.08)) {
+    problems.push(`录制码率太低：${(rec.bps / 1e6).toFixed(1)}Mbps @ ${rec.w}×${rec.h}`);
+  }
+  steps.push(`录制中：面板收起 ${panelHidden}、停止条 ${pillShown}`
+    + `、码率 ${(rec.bps / 1e6).toFixed(1)}Mbps @ ${rec.w}×${rec.h}`);
 
   await page.waitForTimeout(1800);
   const [dl] = await Promise.all([
@@ -348,10 +358,13 @@ async function checkRecord(browser) {
 
   if (hasFfprobe()) {
     const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries',
-      'format_tags:format=duration', '-of', 'json', file], { encoding: 'utf8' }));
+      'format_tags:format=duration,bit_rate', '-of', 'json', file], { encoding: 'utf8' }));
     const tags = (j.format && j.format.tags) || {};
     if (tags.SEED !== '7') problems.push('元数据里没有 SEED=7：' + JSON.stringify(tags));
-    steps.push(`ffprobe 读到 SEED=${tags.SEED}，时长 ${j.format.duration}s`);
+    // 实际码率只做参考：黑底内容编码器会自己省（目标码率是上限）
+    const got = Number(j.format.bit_rate || 0) / 1e6;
+    steps.push(`ffprobe 读到 SEED=${tags.SEED}，时长 ${j.format.duration}s`
+      + (got ? `，实际 ${got.toFixed(1)}Mbps` : ''));
   } else {
     steps.push('（没有 ffprobe，跳过元数据检查）');
   }

@@ -29,6 +29,29 @@
     return '';
   }
 
+  /**
+   * 码率：**必须自己算，不能交给默认值**。Chromium 的默认码率是个与分辨率无关的
+   * 小常数（实测 1280×800@60fps 只有 1.5Mbps 上下），而 captureStream 抓的是画布
+   * 的**后备缓冲**（Retina 上就是 CSS 尺寸 × dpr），于是越清晰的屏幕录出来越糊 ——
+   * 烟花又偏偏是最吃码率的题材：黑底上一堆比像素还小的亮粒子，码率不够就被抹成块。
+   *
+   * 按"每像素每帧多少比特"给：0.12bpp 对这类高对比细碎画面够用（普通视频 0.05~0.08
+   * 就很好看了），再夹到 4~40Mbps，免得小窗口太低、5K 屏失控。
+   */
+  function bitrateFor(width, height, fps) {
+    var bps = width * height * fps * 0.12;
+    return Math.max(4000000, Math.min(40000000, Math.round(bps)));
+  }
+
+  /** 画布实际会被抓成多大（后备缓冲尺寸；拿不到就退回 width/height 属性）。 */
+  function captureSize(canvas, stream) {
+    try {
+      var st = stream.getVideoTracks()[0].getSettings();
+      if (st && st.width && st.height) return { w: st.width, h: st.height };
+    } catch (e) { /* 那就用画布自己的尺寸 */ }
+    return { w: canvas.width || 1, h: canvas.height || 1 };
+  }
+
   /* ------------------------------------------------------------- Recorder */
 
   /**
@@ -61,13 +84,21 @@
     if (this.rec || !supported()) return false;
     var stream = this.canvas.captureStream(this.fps);
     var mime = pickMime();
+    var size = captureSize(this.canvas, stream);
+    this.width = size.w;
+    this.height = size.h;
+    this.bitsPerSecond = bitrateFor(size.w, size.h, this.fps);
+    var opts = { videoBitsPerSecond: this.bitsPerSecond };
+    if (mime) opts.mimeType = mime;
     this.chunks = [];
-    this.rec = mime ? new MediaRecorder(stream, { mimeType: mime })
-                    : new MediaRecorder(stream);
+    this.rec = new MediaRecorder(stream, opts);
     var self = this;
     this.rec.ondataavailable = function (e) { if (e.data && e.data.size) self.chunks.push(e.data); };
     this.rec.start();
     this.startedAt = Date.now();
+    console.log('录制 ' + size.w + '×' + size.h + ' @' + this.fps + 'fps · 目标 '
+      + (this.bitsPerSecond / 1e6).toFixed(1) + ' Mbps'
+      + (mime ? ' · ' + mime.replace('video/webm;codecs=', '') : ''));
     if (this.maxSeconds > 0) {
       this.timer = setTimeout(function () {
         if (self.rec && self.onAutoStop) self.onAutoStop();
