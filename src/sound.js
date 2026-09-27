@@ -139,18 +139,52 @@
     return g;
   };
 
+  /**
+   * 一小段**滑音正弦** —— 发射音里那条窄带"哨音"（真实发射声有，纯噪声没有）。
+   * 参考录音量出来是 2906Hz 线性滑到 2438Hz、比同频段噪声底高 +25dB、窄到 35Hz。
+   * 加一点慢抖动（Hz 级的频率调制）是为了别听起来像信号发生器。
+   */
+  Engine.prototype.toneHit = function (ctx, t, o) {
+    var osc = ctx.createOscillator();
+    var g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(o.from, t);
+    osc.frequency.linearRampToValueAtTime(o.to, t + o.dur);   // 频谱上是条直线
+    if (o.wobble) {
+      var lfo = ctx.createOscillator(), la = ctx.createGain();
+      lfo.frequency.value = o.wobble.rate;
+      la.gain.value = o.wobble.depth;
+      lfo.connect(la);
+      la.connect(osc.frequency);
+      lfo.start(t); lfo.stop(t + o.dur + 0.05);
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.03));
+    g.gain.exponentialRampToValueAtTime(o.end === undefined ? 0.0001 : o.end, t + o.dur);
+    osc.connect(g);
+    g.connect(this.comp);
+    osc.start(t);
+    osc.stop(t + o.dur + 0.05);
+  };
+
   /* ----------------------------------------------------------------- 两种声 */
 
   /**
    * 发射：**四层宽带噪声**（对照真实发射录音量出来的形状，见 tools/sound_shot.js）：
    *
-   *   A  5.5kHz 带通  起音 12ms  收得最快（0.14s）—— 开头那一下"嚓"
-   *   B1 3.6kHz 高通 起音 50ms  中等（0.68s）  —— 高频先死（参考 0.15s 后就不亮了）
-   *   B2 2.4kHz 带通 起音 75ms  最慢（1.6s）   —— 长尾，0.4s 之后听到的主要是它
-   *   C   700Hz 带通 起音 50ms  短（0.45s）    —— 一点低频体积
+   *   A   5.5kHz 带通  起音 12ms  收得最快（0.14s）—— 开头那一下"嚓"
+   *   B1  3.6kHz 高通  起音 50ms  中等（0.95s）   —— 高频先死（参考 0.15s 后就不亮了）
+   *   B2  2.4kHz 带通  起音 75ms  最慢（1.6s）   —— 长尾，0.4s 之后听到的主要是它
+   *   C    700Hz 带通  起音 50ms  短（0.45s）    —— 一点低频体积
+   *   D   2906→2438Hz 正弦，起音后 0.12s 才出现，0.66s 滑完 —— **窄带下滑哨音**
    *
-   * 合起来（tools/sound_shot.js 量的）：起音 ~60ms、衰减 ~48dB/s、峰值谱心 ~8kHz、
-   * −20dB @ +0.45s —— 参考录音是 −43.5dB/s、谱心 7.2kHz、−20dB @ +0.45s。
+   * D 是这版才补上的：真实发射声里有一条很窄的哨音（频谱上一条细亮线，比同频段噪声底
+   * 高 ~25dB，还略微下滑）。之前我把它当成"噪声里的杂讯"忽略了，结果听起来就只有"嘶"
+   * 没有"呜"。
+   *
+   * 合起来（tools/sound_shot.js 量的）：起音 ~60ms、衰减 ~40dB/s、峰值谱心 ~7.4kHz、
+   * −20dB @ +0.44s、哨音 2871→? Hz 且突出度 +25dB —— 参考录音：−43.5dB/s、谱心 7.2kHz、
+   * −20dB @ +0.45s、哨音 2906→2438Hz、突出度 +17~25dB。
    * 早先的版本是"带通 380→1700Hz 扫频 + 620→1250Hz 正弦啸叫、0.42s" —— 正好比参考
    * 多一条音调、少整个高频层，听起来像电子音。
    */
@@ -163,13 +197,17 @@
                             dur: 0.14, gain: 0.13, attack: 0.012, end: 0.00007 });
     // B1：中高频主体，留到 ~0.7s
     this.noiseHit(ctx, t, { type: 'highpass', q: 0.6, from: 3600,
-                            dur: 0.68, gain: 0.060, attack: 0.05, end: 0.00006 });
+                            dur: 0.95, gain: 0.055, attack: 0.05, end: 0.00004 });
     // B2：长尾（0.4s 之后听到的主要是它）
     this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.7, from: 2400,
                                     dur: 1.60, gain: 0.062, attack: 0.075, end: 0.00005 });
     // C：一点低频体积
     this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.9, from: 700,
                                     dur: 0.45, gain: 0.040, attack: 0.05, end: 0.00015 });
+    // 哨音：0.44s 才出现（跟参考一样），线性下滑，1.2s 前没入噪声
+    this.toneHit(ctx, t + 0.12, { from: 2906, to: 2438, dur: 0.66, gain: 0.019,
+                                  attack: 0.035, end: 0.0009,
+                                  wobble: { rate: 5.5, depth: 5 } });
     this.launches++;
   };
 
