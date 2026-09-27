@@ -14,6 +14,17 @@
 
   var ROCKET_G = 520.0;                 // 上升段重力（决定发射速度与上升时间）
 
+  /**
+   * 爆心那簇碎屑的开关（全部都在这里，方便调）：
+   *   seconds  炸开之后还撒多久 —— 过了就再也不往爆心补粒子
+   *   interval 撒的间隔（0.012s ≈ 80 颗/秒，一簇二十来颗）
+   *   size     每颗的半径（比上升段那几颗显眼，才撑得起"爆炸特效"）
+   *   life     每颗自己的寿命
+   * "炸开有粒子特效、炸完立刻消失"就靠这几个数：最后一个粒子最晚在
+   * seconds + life[1] = 0.6s 之后消失。
+   */
+  var BURST_PUFF = { seconds: 0.18, interval: 0.012, size: 3.6, life: [0.2, 0.42] };
+
   function Firework(show, style, palette, launch, burst, rng, o) {
     o = o || {};
     this.show = show;
@@ -39,6 +50,7 @@
     show.add(this.trail);
     show.add(this.rocket);
     this.emberAcc = 0.0;
+    this.burstAge = 0.0;                    // 爆开之后过了多久（只用来卡爆心碎屑的窗口）
     this.count = (o.count === undefined) ? null : o.count;
     this.radius = (o.radius === undefined) ? null : o.radius;
   }
@@ -46,18 +58,29 @@
   /* ---------------------------------------------------------------- 上升 */
 
   /**
-   * 上升段：推进弹体、喂尾迹、撒几颗余烬。
+   * 上升段：推进弹体、喂尾迹、撒几颗余烬；炸开之后只负责爆心那一小簇碎屑。
    *
-   * 爆完之后这里**什么都不做**：原来还有个"爆炸后继续撒火星"的分支 —— 它在爆点
-   * （就是爆炸中心）以约 11 颗/秒继续喷余烬，一直喷到发射尾迹淡完（3.4s），实测
-   * 全部余烬的 61% 来自这里。那批碎屑飘在中心不散，正是"烟花都爆完了粒子还在"的
-   * 来源（有人截图的那一刻：在飞的 3 发全爆完了，屏幕上还有 21 火花 + 26 余烬）。
-   * 现在爆点的碎屑只留爆心闪光那一瞬，要掉碎屑靠火花自己（willow / palm 的 ember）。
+   * 爆心碎屑（`BURST_PUFF`）：炸开那一下在爆点密撒一小簇，**只撒 0.18s**，每颗也只活
+   * 0.15~0.35s，所以"炸开有粒子、炸完立刻干净"。教训写在下面这条 git 记录里：早先这个
+   * 分支是每 0.09s 一颗、一直撒到发射尾迹淡完（3.4s），实测全部余烬的 56% 来自它，
+   * 中心飘着一层不散的碎屑 —— 观感就是"烟花都爆完了粒子还在"。
    *
    * 注意别顺手去收花火的 life / 上升尾迹：那些"余韵"是花型本身的样子，不是残留。
    */
   Firework.prototype.update = function (dt) {
-    if (this.phase !== 'rise') return;
+    if (this.phase !== 'rise') {
+      this.burstAge += dt;
+      if (this.burstAge >= BURST_PUFF.seconds) return;   // 窗口过了：爆心不再补粒子
+      this.emberAcc += dt;
+      while (this.emberAcc > BURST_PUFF.interval) {
+        this.emberAcc -= BURST_PUFF.interval;
+        this.show.add(new el.Ember(this.show, this.x, this.y,
+                                   this.rng.uniform(-70, 70), this.rng.uniform(-40, 80),
+                                   this.palette.core, BURST_PUFF.size,
+                                   this.rng.uniform(BURST_PUFF.life[0], BURST_PUFF.life[1])));
+      }
+      return;
+    }
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     this.vy -= ROCKET_G * dt;
