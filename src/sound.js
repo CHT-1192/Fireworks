@@ -24,7 +24,7 @@
     o = o || {};
     this.level = (o.level === undefined) ? 0.2 : o.level;
     this.enabled = o.enabled !== false;
-    this.ctx = null;
+    this.ctx = o.context || null;        // 注入上下文 = 离线渲染（tools/sound_shot.js 用）
     this.comp = null;
     this.master = null;
     this.mix = null;                 // 录制用的音频输出（MediaStreamDestination）
@@ -36,24 +36,36 @@
     this.dropped = 0;
   }
 
-  /** 建（或取）音频上下文。必须在用户手势里第一次调用。 */
+  /**
+   * 建（或取）音频上下文与节点图。必须在用户手势里第一次调用。
+   * 上下文可以是注入进来的（离线渲染用 OfflineAudioContext）—— 所以"建上下文"和
+   * "搭节点图"是两件事：注入了上下文时仍要把压缩器/主增益接上（否则没地方出声）。
+   */
   Engine.prototype.ensure = function () {
-    if (this.ctx) return this.ctx;
-    if (!supported()) return null;
-    var C = window.AudioContext || window.webkitAudioContext;
-    var ctx = new C();
-    this.comp = ctx.createDynamicsCompressor();     // 收一下峰值，别爆音
+    if (!this.ctx) {
+      if (!supported()) return null;
+      var C = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new C();
+    }
+    var ctx = this.ctx;
+    if (this.comp) return ctx;                        // 图已经搭好了
+    this.comp = ctx.createDynamicsCompressor();        // 收一下峰值，别爆音
     this.comp.threshold.value = -14;
     this.comp.ratio.value = 8;
     this.master = ctx.createGain();
     this.master.gain.value = this.enabled ? this.level : 0;
-    this.comp.connect(this.master);
+    // 低通 17kHz：真实录音的顶上是滚降的，白噪声一路到 24k 听着会"太嘶"
+    this.tone = ctx.createBiquadFilter();
+    this.tone.type = 'lowpass';
+    this.tone.frequency.value = 15000;
+    this.tone.Q.value = 0.4;
+    this.comp.connect(this.tone);
+    this.tone.connect(this.master);
     this.master.connect(ctx.destination);
-    if (ctx.createMediaStreamDestination) {
+    if (ctx.createMediaStreamDestination) {            // 离线上下文没有这个，跳过
       this.mix = ctx.createMediaStreamDestination();
       this.master.connect(this.mix);
     }
-    this.ctx = ctx;
     return ctx;
   };
 
@@ -117,40 +129,47 @@
     f.frequency.setValueAtTime(o.from, t);
     if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + o.dur);
     var g = ctx.createGain();
+    var end = o.end === undefined ? 0.0001 : o.end;    // 收尾电平：决定衰减斜率(dB/s)
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.012));
-    g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+    g.gain.exponentialRampToValueAtTime(end, t + o.dur);
     src.connect(f); f.connect(g); g.connect(this.comp);
     src.start(t);
-    src.stop(t + o.dur + 0.02);
+    src.stop(t + o.dur + 0.05);
     return g;
   };
 
   /* ----------------------------------------------------------------- 两种声 */
 
   /**
-   * 发射：噪声从低扫到高（"咻"）。
-   * 注意这里是读 `this.ctx` 而**不是** ensure()：上下文只允许在用户手势里创建，
-   * 否则 Chromium 会拦下来（控制台抱怨 "AudioContext was not allowed to start"）
-   * 并让上下文停在 suspended。没上下文就安静 —— 用户一动手（点画面/按 R/点开关）
-   * 才会建，之后自动放的那些也就有声音了。
+   * 发射：**四层宽带噪声**（对照真实发射录音量出来的形状，见 tools/sound_shot.js）：
+   *
+   *   A  5.5kHz 带通  起音 12ms  收得最快（0.14s）—— 开头那一下"嚓"
+   *   B1 3.6kHz 高通 起音 50ms  中等（0.68s）  —— 高频先死（参考 0.15s 后就不亮了）
+   *   B2 2.4kHz 带通 起音 75ms  最慢（1.6s）   —— 长尾，0.4s 之后听到的主要是它
+   *   C   700Hz 带通 起音 50ms  短（0.45s）    —— 一点低频体积
+   *
+   * 合起来（tools/sound_shot.js 量的）：起音 ~60ms、衰减 ~48dB/s、峰值谱心 ~8kHz、
+   * −20dB @ +0.45s —— 参考录音是 −43.5dB/s、谱心 7.2kHz、−20dB @ +0.45s。
+   * 早先的版本是"带通 380→1700Hz 扫频 + 620→1250Hz 正弦啸叫、0.42s" —— 正好比参考
+   * 多一条音调、少整个高频层，听起来像电子音。
    */
   Engine.prototype.launch = function () {
     var ctx = this.ctx;
     if (!ctx || !this.enabled || !this.spend()) return;
-    var t = ctx.currentTime + 0.01;
-    this.noiseHit(ctx, t, { type: 'bandpass', q: 1.6, from: 380, to: 1700,
-                            dur: 0.42, gain: 0.16, attack: 0.06 });
-    var o = ctx.createOscillator();                 // 一点啸叫，让它更像"上去"
-    var g = ctx.createGain();
-    o.type = 'sine';
-    o.frequency.setValueAtTime(620 * (1 + Math.random() * 0.1), t);
-    o.frequency.exponentialRampToValueAtTime(1250, t + 0.38);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.035, t + 0.08);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    o.connect(g); g.connect(this.comp);
-    o.start(t); o.stop(t + 0.42);
+    var t = ctx.currentTime + 0.005;
+    // A：一记宽带脆响，~0.15s 内消失（参考里 0.15s 之后就不亮了）
+    this.noiseHit(ctx, t, { type: 'bandpass', q: 0.55, from: 5500,
+                            dur: 0.14, gain: 0.13, attack: 0.012, end: 0.00007 });
+    // B1：中高频主体，留到 ~0.7s
+    this.noiseHit(ctx, t, { type: 'highpass', q: 0.6, from: 3600,
+                            dur: 0.68, gain: 0.060, attack: 0.05, end: 0.00006 });
+    // B2：长尾（0.4s 之后听到的主要是它）
+    this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.7, from: 2400,
+                                    dur: 1.60, gain: 0.062, attack: 0.075, end: 0.00005 });
+    // C：一点低频体积
+    this.noiseHit(ctx, t + 0.004, { type: 'bandpass', q: 0.9, from: 700,
+                                    dur: 0.45, gain: 0.040, attack: 0.05, end: 0.00015 });
     this.launches++;
   };
 

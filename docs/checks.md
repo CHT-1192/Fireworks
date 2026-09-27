@@ -84,6 +84,7 @@ docs/                 用法 / 校验 / 花型参数表 + preview 实拍图 +（
 tools/
   pw.js               Playwright + 开发服务器的公共件（驱动系统 Chromium）
   shot.js             截图（--spam N 按 N 次 R、--step M 再推 M 帧，结果可复现）
+  sound_shot.js       把合成音渲染成 WAV 并量包络/频段（--ref 可量真实录音，用来调音效）
   browser_check.js    真浏览器自检：交付产物 + 开发页 + 便条 + 打字 + 快捷键 + 录制 + 交互
   baseline.js|json    行为基线：录制 / 比对每帧指纹（日常主力）
   render_smoke.js     Node 自检：假 canvas 渲染 + 主循环 + 种子规则 + 预算
