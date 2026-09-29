@@ -373,6 +373,18 @@ async function checkRecord(browser) {
     steps.push('（没有 ffprobe，跳过元数据检查）');
   }
 
+  // 录音电平：太低等于"没声音"（曾经 App 实录峰值只有 −17.4dBFS，而参考录音是 −4~−8）
+  if (hasFfprobe()) {
+    const vt = spawnSync('ffmpeg', ['-hide_banner', '-i', file, '-af', 'volumedetect',
+                                    '-f', 'null', '-'], { encoding: 'utf8' });
+    const m = /max_volume:\s*(-?[\d.]+) dB/.exec((vt.stderr || '') + (vt.stdout || ''));
+    const peak = m ? Number(m[1]) : NaN;
+    if (!m) problems.push('量不出录音电平（ffmpeg volumedetect 没输出）');
+    else if (peak > -1) problems.push(`录音削顶了：峰值 ${peak} dBFS`);
+    else if (peak < -20) problems.push(`录音太轻：峰值只有 ${peak} dBFS（参考录音是 −4~−8）`);
+    else steps.push(`录音峰值 ${peak} dBFS`);
+  }
+
   const dec = await page.evaluate(async (b64) => {
     const bin = atob(b64);
     const u8 = new Uint8Array(bin.length);

@@ -16,6 +16,7 @@
     "record.js",
     "pngmeta.js",
     "sound.js",
+    "sound_kit.js",
     "actions.js",
     "ui.js"
   ]

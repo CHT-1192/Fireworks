@@ -23,7 +23,7 @@
     "check": "node build.js --check",
     "baseline": "node tools/baseline.js",
     "baseline:update": "node tools/baseline.js --update",
-    "smoke": "node tools/render_smoke.js",
+    "smoke": "node tools/modules_check.js && node tools/render_smoke.js",
     "browser": "node tools/browser_check.js",
     "rng": "node tools/rng_check.js",
     "verify": "node build.js --check && node tools/render_smoke.js && node tools/baseline.js",

@@ -1,7 +1,7 @@
 <!--
   烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
-  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> a11y.js -> ebml.js -> record.js -> pngmeta.js -> sound.js -> actions.js -> ui.js
+  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> a11y.js -> ebml.js -> record.js -> pngmeta.js -> sound.js -> sound_kit.js -> actions.js -> ui.js
   许可: Apache-2.0（见 LICENSE / NOTICE）
 -->
 <!doctype html>
@@ -2253,7 +2253,7 @@ setTimeout(function () {
 
   function Engine(o) {
     o = o || {};
-    this.level = (o.level === undefined) ? 0.2 : o.level;
+    this.level = (o.level === undefined) ? 0.6 : o.level;   // 整体电平（分层增益保持相对比例）
     this.enabled = o.enabled !== false;
     this.ctx = o.context || null;        // 注入上下文 = 离线渲染（tools/sound_shot.js 用）
     this.comp = null;
@@ -2327,19 +2327,6 @@ setTimeout(function () {
              enabled: this.enabled, context: this.ctx ? this.ctx.state : 'none' };
   };
 
-  /* ------------------------------------------------------------- 合成小件 */
-
-  /** 白噪声（1 秒，够所有效果用了；噪声源都 loop 它）。 */
-  Engine.prototype.noise = function (ctx) {
-    if (this.buf) return this.buf;
-    var n = Math.floor(ctx.sampleRate * 1.0);
-    var buf = ctx.createBuffer(1, n, ctx.sampleRate);
-    var d = buf.getChannelData(0);
-    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-    this.buf = buf;
-    return buf;
-  };
-
   /**
    * 这一声该多响：预算够就是 1，超了压到 SQUEEZED（**不丢音**）。
    * 齐射本来就该听着像"一声更大的"，而不是"漏掉几声"。
@@ -2356,56 +2343,9 @@ setTimeout(function () {
     return SQUEEZED;
   };
 
-  /** 一小段带包络的噪声：滤波类型/频率/时长/音量由调用者给。 */
-  Engine.prototype.noiseHit = function (ctx, t, o) {
-    var src = ctx.createBufferSource();
-    src.buffer = this.noise(ctx);
-    src.loop = true;
-    var f = ctx.createBiquadFilter();
-    f.type = o.type || 'bandpass';
-    f.Q.value = o.q === undefined ? 1.2 : o.q;
-    f.frequency.setValueAtTime(o.from, t);
-    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + o.dur);
-    var g = ctx.createGain();
-    var end = o.end === undefined ? 0.0001 : o.end;    // 收尾电平：决定衰减斜率(dB/s)
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.012));
-    g.gain.exponentialRampToValueAtTime(end, t + o.dur);
-    src.connect(f); f.connect(g); g.connect(this.comp);
-    src.start(t);
-    src.stop(t + o.dur + 0.05);
-    return g;
-  };
-
-  /**
-   * 一小段**滑音正弦** —— 发射音里那条窄带"哨音"（真实发射声有，纯噪声没有）。
-   * 参考录音量出来是 2906Hz 线性滑到 2438Hz、比同频段噪声底高 +25dB、窄到 35Hz。
-   * 加一点慢抖动（Hz 级的频率调制）是为了别听起来像信号发生器。
-   */
-  Engine.prototype.toneHit = function (ctx, t, o) {
-    var osc = ctx.createOscillator();
-    var g = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(o.from, t);
-    osc.frequency.linearRampToValueAtTime(o.to, t + o.dur);   // 频谱上是条直线
-    if (o.wobble) {
-      var lfo = ctx.createOscillator(), la = ctx.createGain();
-      lfo.frequency.value = o.wobble.rate;
-      la.gain.value = o.wobble.depth;
-      lfo.connect(la);
-      la.connect(osc.frequency);
-      lfo.start(t); lfo.stop(t + o.dur + 0.05);
-    }
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.03));
-    g.gain.exponentialRampToValueAtTime(o.end === undefined ? 0.0001 : o.end, t + o.dur);
-    osc.connect(g);
-    g.connect(this.comp);
-    osc.start(t);
-    osc.stop(t + o.dur + 0.05);
-  };
 
   /* ----------------------------------------------------------------- 两种声 */
+  // 这里用的 noise() / noiseHit() / toneHit() 在 src/sound_kit.js（合成小件单独一个文件）
 
   /**
    * 发射：**四层宽带噪声**（对照真实发射录音量出来的形状，见 tools/sound_shot.js）：
@@ -2473,41 +2413,43 @@ setTimeout(function () {
     var t = ctx.currentTime + 0.01;
     var k = this.gainFactor();                           // 齐射时压小，但不丢
     // 脆/闷：壳大偏闷，另外每发都有点不同（真实爆炸声本来就不一样）
-    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp : 0.58 + (Math.random() - 0.5) * 0.36;
-    if (ev && ev.radius) crisp += (200 - ev.radius) / 900;      // 半径大 → 更闷
-    crisp = Math.max(0.12, Math.min(0.95, crisp));
+    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp : 0.58 + (Math.random() - 0.5) * 0.44;
+    if (ev && ev.radius) crisp += (200 - ev.radius) / 450;      // 半径大 → 更闷
+    crisp = Math.max(0.05, Math.min(0.98, crisp));
+    var c = crisp - 0.58;          // 下面每层都写成「0.58 时调好的值 + c×跨度」：
+                                   // 默认那档仍与参考录音对齐，两端则明显更脆/更闷
 
     // 1) 脉冲 + 脆响：1ms 起音的高通噪声（频谱上是那根竖线），脆则更亮更响
-    this.noiseHit(ctx, t, { type: 'bandpass', q: 0.6, from: 3000,
-                            dur: 0.026, gain: 0.34 * k, attack: 0.001, end: 0.0003 });
+    this.noiseHit(ctx, t, { type: 'bandpass', q: 0.6, from: 3000 + 2600 * c,
+                            dur: 0.026, gain: (0.34 + 0.35 * c) * k, attack: 0.001, end: 0.0003 });
     this.noiseHit(ctx, t, { type: 'bandpass', q: 0.7,
-                            from: 3600 + 1400 * crisp,
+                            from: 4400 + 4200 * c,
                             q: 1.0,
-                            dur: 0.36 + 0.18 * (1 - crisp),
-                            gain: (0.30 + 0.12 * crisp) * k, attack: 0.004, end: 0.0011 });
+                            dur: 0.44 - 0.34 * c,
+                            gain: (0.37 + 0.30 * c) * k, attack: 0.004, end: 0.0011 });
     // 2) 低频身体：正弦下扫（大鼓那一下）
     var o = ctx.createOscillator();
     var g = ctx.createGain();
     o.type = 'sine';
-    o.frequency.setValueAtTime(126 - 40 * crisp, t);
+    o.frequency.setValueAtTime(103 - 60 * c, t);
     o.frequency.exponentialRampToValueAtTime(42, t + 0.26 + 0.18 * (1 - crisp));
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime((0.11 + 0.045 * (1 - crisp)) * k, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.50 + 0.24 * (1 - crisp));
+    g.gain.exponentialRampToValueAtTime((0.129 - 0.060 * c) * k, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.62 - 0.26 * c);
     o.connect(g); g.connect(this.comp);
     o.start(t); o.stop(t + 0.5);
     // 3) 低频轰隆：0.5kHz 以下的尾巴（参考里 +0.3s 时它占 95%）
     this.noiseHit(ctx, t, { type: 'lowpass', q: 0.7,
-                            from: 430 - 130 * crisp,
-                            dur: 1.05 + 0.45 * (1 - crisp),
-                            gain: (0.24 + 0.12 * (1 - crisp)) * k,
+                            from: 355 - 140 * c,
+                            dur: 1.24 - 0.90 * c,
+                            gain: (0.29 - 0.12 * c) * k,
                             attack: 0.008, end: 0.0003 });
     // 4) 碎屑噼啪（轻）：脆的时候多两下
-    var crackles = 3 + Math.floor(Math.random() * (2 + 4 * crisp));
+    var crackles = 2 + Math.floor(Math.random() * (2 + 6 * crisp));
     for (var i = 0; i < crackles; i++) {
       this.noiseHit(ctx, t + 0.03 + Math.random() * 0.22, {
         type: 'bandpass', q: 5, from: 2200 + Math.random() * 3400,
-        dur: 0.035, gain: 0.040 * k, attack: 0.002 });
+        dur: 0.035, gain: (0.032 + 0.030 * crisp) * k, attack: 0.002 });
     }
     this.bursts++;
   };
@@ -2520,6 +2462,85 @@ setTimeout(function () {
   };
 
   FW.sound = { Engine: Engine, supported: supported };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/sound_kit.js ===================== */
+/* ============================================================================
+ * sound_kit.js —— 合成小件：白噪声缓冲、带包络的噪声、滑音正弦
+ * ---------------------------------------------------------------------------
+ * 这三件挂在 sound.js 的 Engine 上（发射/爆炸都由它们拼出来）。单独一个文件是为了
+ * 守住"每个文件 ≤300 行"：sound.js 管编排（层次、脆闷、发声预算），这里只管"怎么造
+ * 一个声音"。
+ *
+ * 注意：这里必须写 `FW.sound.Engine.prototype`，**不能写裸名 Engine** —— 单文件版把
+ * 所有模块串成一个 <script>，模块里一旦抛 ReferenceError，后面的模块（包括 ui.js）
+ * 就全不执行，页面直接空白（这个坑真踩过）。tools/modules_check.js 守着这一类问题。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  /* ------------------------------------------------------------- 合成小件 */
+
+  /** 白噪声（1 秒，够所有效果用了；噪声源都 loop 它）。 */
+  FW.sound.Engine.prototype.noise = function (ctx) {
+    if (this.buf) return this.buf;
+    var n = Math.floor(ctx.sampleRate * 1.0);
+    var buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    this.buf = buf;
+    return buf;
+  };
+
+  /** 一小段带包络的噪声：滤波类型/频率/时长/音量由调用者给。 */
+  FW.sound.Engine.prototype.noiseHit = function (ctx, t, o) {
+    var src = ctx.createBufferSource();
+    src.buffer = this.noise(ctx);
+    src.loop = true;
+    var f = ctx.createBiquadFilter();
+    f.type = o.type || 'bandpass';
+    f.Q.value = o.q === undefined ? 1.2 : o.q;
+    f.frequency.setValueAtTime(o.from, t);
+    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + o.dur);
+    var g = ctx.createGain();
+    var end = o.end === undefined ? 0.0001 : o.end;    // 收尾电平：决定衰减斜率(dB/s)
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.012));
+    g.gain.exponentialRampToValueAtTime(end, t + o.dur);
+    src.connect(f); f.connect(g); g.connect(this.comp);
+    src.start(t);
+    src.stop(t + o.dur + 0.05);
+    return g;
+  };
+
+  /**
+   * 一小段**滑音正弦** —— 发射音里那条窄带"哨音"（真实发射声有，纯噪声没有）。
+   * 参考录音量出来是 2906Hz 线性滑到 2438Hz、比同频段噪声底高 +25dB、窄到 35Hz。
+   * 加一点慢抖动（Hz 级的频率调制）是为了别听起来像信号发生器。
+   */
+  FW.sound.Engine.prototype.toneHit = function (ctx, t, o) {
+    var osc = ctx.createOscillator();
+    var g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(o.from, t);
+    osc.frequency.linearRampToValueAtTime(o.to, t + o.dur);   // 频谱上是条直线
+    if (o.wobble) {
+      var lfo = ctx.createOscillator(), la = ctx.createGain();
+      lfo.frequency.value = o.wobble.rate;
+      la.gain.value = o.wobble.depth;
+      lfo.connect(la);
+      la.connect(osc.frequency);
+      lfo.start(t); lfo.stop(t + o.dur + 0.05);
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(o.gain, t + (o.attack || 0.03));
+    g.gain.exponentialRampToValueAtTime(o.end === undefined ? 0.0001 : o.end, t + o.dur);
+    osc.connect(g);
+    g.connect(this.comp);
+    osc.start(t);
+    osc.stop(t + o.dur + 0.05);
+  };
+
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/actions.js ===================== */
