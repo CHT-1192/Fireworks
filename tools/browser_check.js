@@ -729,12 +729,14 @@ async function checkA11y(browser) {
 /* -------------------------------------------  F) 调参面板（?tune=1） */
 
 /**
- * 调参面板只在 `?tune=1` 时出现，而且**只有这时候才读存储里的那份改动** ——
- * 所以别人打开页面永远是默认档。这一段验四件事：
- *   ① 不带 ?tune=1：没有面板、存储里的调参不生效（哪怕它就在那儿）；
- *   ② 拖一条滑条：原地改到真身上、落盘、并且"活"的项（背景色/电平）立刻生效；
- *   ③ 刷新后仍然生效（?tune=1 时读回来的）；
- *   ④ 「复位全部」把值和存储都清回默认，分享链接里不带调参。
+ * 调参面板**平时就能用**（控制台「调参」按钮 / 快捷键 T），而且**懒加载**：没打开之前
+ * 页面上没有它的节点，`?tune=1` 只是"一进来就自动打开"。这一段验六件事：
+ *   ① 没调过的人永远是默认档（没有 fw.tune = 默认），面板只在打开时才建出来；
+ *   ② 调过的人（存了 fw.tune）不带 ?tune=1 打开也照常生效；
+ *   ③ 拖一条滑条：原地改到真身上、落盘、并且"活"的项（背景色/电平）立刻生效；
+ *   ④ 刷新后仍然生效；切花型/全部参数 JSON 都能用；
+ *   ⑤ 「复位全部」把值和存储都清回默认，分享链接里不带调参；
+ *   ⑥ T 键收起 / 再打开。
  */
 async function checkTune(browser) {
   console.log('\nF) 调参面板');
@@ -746,32 +748,66 @@ async function checkTune(browser) {
   const problems = [];
   const steps = [];
 
-  // F1) 不带 ?tune=1：页面照旧，存储里那份改动不该生效
+  // F1) 平时就能用 + 懒加载：没调过的访客是默认档；「调参」按钮与 T 都能打开
   const plain = await pw.openPage(browser, BASE + '/?seed=7&max=900',
                                   { viewport: { width: 1280, height: 800 } });
+  await plain.page.evaluate(() => localStorage.removeItem('fw.tune'));
+  await plain.page.reload();
+  await plain.page.waitForTimeout(400);
+  const fresh = await plain.page.evaluate(() => ({
+    panel: !!document.getElementById('tune'),
+    wanted: FW.tune.wanted(),
+    btn: !!document.getElementById('tune-open'),
+    flash: FW.elements.PHYS.flashLife,
+    bg: FW.app.instance.renderer.bg
+  }));
+  if (fresh.wanted) problems.push('没有 ?tune=1 时 wanted() 应当是 false');
+  if (!fresh.btn) problems.push('控制台里没有「调参」按钮');
+  if (fresh.panel) problems.push('没打开之前不该有面板节点（懒加载）');
+  if (fresh.flash !== 0.22 || fresh.bg !== '#000020') {
+    problems.push('没调过的访客应当是默认档：' + JSON.stringify(fresh));
+  }
+  await plain.page.click('#tune-open');                 // 按钮打开
+  const btnOn = await plain.page.evaluate(() => {
+    const b = document.getElementById('tune');
+    return { panel: !!b, hidden: b ? b.hidden : null,
+             sliders: b ? b.querySelectorAll('input[type=range]').length : 0 };
+  });
+  if (!btnOn.panel || btnOn.hidden || !(btnOn.sliders > 20)) {
+    problems.push('「调参」按钮没有把面板打开：' + JSON.stringify(btnOn));
+  }
+  await plain.page.keyboard.press('t');                 // T 收起
+  const tOff = await plain.page.evaluate(() => document.getElementById('tune').hidden);
+  await plain.page.keyboard.press('t');                 // 再按打开
+  const tOn = await plain.page.evaluate(() => document.getElementById('tune').hidden);
+  if (!tOff || tOn) problems.push(`T 键收起/打开不工作：${tOff} / ${tOn}`);
+  steps.push(`不带 ?tune=1：默认档、无面板节点；「调参」按钮与 T 都能开（${btnOn.sliders} 条滑条）`);
+
+  // F1b) 调过的人（存储里有 fw.tune）不带 ?tune=1 打开也照常生效
   await plain.page.evaluate(() => {
     localStorage.setItem('fw.tune', JSON.stringify({ 'phys.flashLife': 0.9,
                                                      'bg.hex': '#123456' }));
   });
   await plain.page.reload();
   await plain.page.waitForTimeout(400);
-  const off = await plain.page.evaluate(() => ({
-    panel: !!document.getElementById('tune'),
-    wanted: FW.tune.wanted(),
+  const kept = await plain.page.evaluate(() => ({
     flash: FW.elements.PHYS.flashLife,
     bg: FW.app.instance.renderer.bg,
-    stored: !!localStorage.getItem('fw.tune')
+    panel: !!document.getElementById('tune'),
+    changed: FW.tune.changed()
   }));
-  if (off.panel) problems.push('没有 ?tune=1 时不该有调参面板');
-  if (off.wanted) problems.push('没有 ?tune=1 时 wanted() 应当是 false');
-  if (off.flash !== 0.22) problems.push('没有 ?tune=1 时存储里的调参不该生效：' + off.flash);
-  if (off.bg !== '#000020') problems.push('没有 ?tune=1 时背景色应保持默认：' + off.bg);
-  steps.push(`不带 ?tune=1：无面板，存储里那份（还在：${off.stored}）不生效`);
+  if (kept.flash !== 0.9 || kept.bg !== '#123456' || kept.changed !== 2) {
+    problems.push('存储里的调参应当照常生效：' + JSON.stringify(kept));
+  }
+  if (kept.panel) problems.push('不带 ?tune=1 时不该自动把面板打开');
+  steps.push(`调过的人：不带 ?tune=1 也照常生效（flashLife ${kept.flash}、背景 ${kept.bg}），只是不自动展开`);
   await plain.page.close();
 
   // F2) ?tune=1：面板出现，默认状态下"零改动"
   const { page, logs } = await pw.openPage(browser, BASE + '/?seed=7&max=900&tune=1',
                                            { viewport: { width: 1280, height: 800 } });
+  await page.evaluate(() => localStorage.removeItem('fw.tune'));   // 从"没调过"开始
+  await page.reload();
   await page.waitForTimeout(500);
   const on = await page.evaluate(() => ({
     panel: !!document.getElementById('tune'),

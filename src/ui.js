@@ -175,6 +175,7 @@
     });
     $('share').addEventListener('click', function () { self.copyLink(this); });
     $('fullscreen').addEventListener('click', function () { self.toggleFullscreen(this); });
+    $('tune-open').addEventListener('click', function () { FW.tuneUi.toggle(self.store); });
     $('show').addEventListener('click', function () { self.toggleUi(); });
     $('budget').addEventListener('input', function () {
       self.maxGeos = parseInt(this.value, 10);
@@ -241,10 +242,12 @@
   function boot() {
     var st = store();
     var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    // 调参面板：只有 ?tune=1 才读存储里的那份改动（这样别人打开页面永远是默认档）。
-    // 必须在构造 App 之前读 —— 背景色 / 电平 / 低通 / 减少动效降幅都是"建的时候就取一次"。
-    var tuning = !!(FW.tune && FW.tune.wanted());
-    if (tuning) FW.tune.load(st);
+    // 调参：存储里那份改动**照常生效**（那是你自己这台机器上的选择）；`?tune=1` 只是
+    // "一进来就把面板打开"，面板平时按控制台的「调参」或 T 也能开。必须在这里读 ——
+    // 背景色 / 电平 / 低通 / 减少动效降幅都是"建的时候取一次"。没调过的人没有 fw.tune，
+    // 打开的永远是默认档。
+    FW.tune.load(st);
+    FW.tuneUi.bindKeys(st);
     var inst = new FW.app.App({
       canvas: $('stage'),
       search: new URLSearchParams(location.search),
@@ -253,7 +256,7 @@
       reducedMotion: !!(mq && mq.matches)
     });
     FW.app.instance = inst;
-    if (tuning) FW.tuneUi.mount(st);
+    if (FW.tune.wanted()) FW.tuneUi.mount(st);
     if (mq) inst.bindReducedMotion(mq);
     inst.start();
     inst.syncPanel();                    // 声音开关的 aria 状态要一开始就对

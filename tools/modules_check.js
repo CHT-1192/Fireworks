@@ -78,7 +78,7 @@ const WANT = [
   'FW.tune.controls', 'FW.tune.group', 'FW.tune.styleNames', 'FW.tune.wanted',
   'FW.tune.load', 'FW.tune.save', 'FW.tune.reset', 'FW.tune.diff', 'FW.tune.diffJson',
   'FW.tune.allJson', 'FW.tune.applyJson', 'FW.tune.applyLive',
-  'FW.tuneUi.mount'
+  'FW.tuneUi.mount', 'FW.tuneUi.toggle', 'FW.tuneUi.bindKeys'
 ];
 
 stubDom();

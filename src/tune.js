@@ -167,6 +167,7 @@
 
   function changed() { return Object.keys(diff()).length; }
 
+  /** `?tune=1` = 一进来就自动把面板打开（面板本身随时可用：控制台「调参」或按 T）。 */
   function wanted() {
     var q = (typeof location === 'undefined') ? '' : (location.search || '');
     return /[?&]tune=1(&|$)/.test(q);

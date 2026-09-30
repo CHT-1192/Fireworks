@@ -1,8 +1,9 @@
 /* ============================================================================
  * tune_ui.js —— 调参面板的 DOM（参数表在 src/tune.js）
  * ---------------------------------------------------------------------------
- * 只在 `?tune=1` 时由 ui.js 挂上来；平时这个文件不建任何节点，连 <style> 都不注入。
- * 面板放在**右下**（HUD 在右上、控制台在左），互不遮挡。
+ * **平时不建任何节点**（连 <style> 都不注入）：控制台里的「调参」按钮或按 **T** 才第一次
+ * 挂上来（`?tune=1` 只是"一进来就自动打开"，老链接照旧好用）。面板放在**右下**
+ * （HUD 在右上、控制台在左），互不遮挡。
  *
  * 面板只做三件事：拖动 -> 原地改默认值（tune.set）、送一次"活"更新（tune.applyLive）、
  * 松手时把"改过的那几项"落盘（tune.save -> localStorage 的 fw.tune）。
@@ -11,6 +12,8 @@
  * ==========================================================================*/
 ;(function (FW) {
   'use strict';
+
+  var mounted = null;          // 已经建出来的那块面板（懒加载：没打开就没有节点）
 
   var CSS = [
     '#tune{position:fixed;right:12px;bottom:12px;z-index:5;width:330px;max-height:min(72vh,760px);',
@@ -82,13 +85,14 @@
   function mount(store) {
     var T = FW.tune, app = FW.app.instance;
     if (!T || !app) return null;
+    if (mounted) return mounted;                  // 幂等：重复调用只是拿到同一块面板
     var st = document.createElement('style');
     st.textContent = CSS;
     document.head.appendChild(st);
 
     var box = h('aside');
     box.id = 'tune';
-    box.setAttribute('aria-label', '调参面板（?tune=1 时出现）');
+    box.setAttribute('aria-label', '调参面板');
     var inputs = {};                                   // id -> {inp, out}，用于复位/应用后刷新
 
     var stat = h('p', 'note');
@@ -109,7 +113,7 @@
     head.appendChild(h('b', null, '调参面板'));
     var close = h('button', 'mini', '收起');
     close.id = 'tune-close';
-    close.title = '只把这个面板收起来（按 T 再打开）；调参继续生效，复位请按「复位全部」';
+    close.title = '只把这个面板收起来（控制台「调参」或按 T 再打开）；调参继续生效，复位请按「复位全部」';
     close.addEventListener('click', function () { box.hidden = true; msgEl.textContent = '已收起（按 T 再打开）'; });
     head.appendChild(close);
     box.appendChild(head);
@@ -230,25 +234,32 @@
       } else fallback();
     }
 
-    /* ------------------------------------------------------------------ 键盘 */
+    document.body.appendChild(box);
+    mounted = box;
+    status();
+    return box;
+  }
 
-    function toggle(e) {
+  /** 打开 / 收起：第一次调用才真的把面板建出来（别人不进调参就一点开销都没有）。 */
+  function toggle(store) {
+    if (!mounted) return mount(store);
+    mounted.hidden = !mounted.hidden;
+    return mounted;
+  }
+
+  /** 键盘：**T** 打开 / 收起。正在打字（文本类控件 / 下拉 / 文本域）时让位。 */
+  function bindKeys(store) {
+    window.addEventListener('keydown', function (e) {
       var el = e.target || {};
       var tag = String(el.tagName || '').toLowerCase();
       if (tag === 'textarea' || tag === 'select') return;
       if (tag === 'input' && /^(text|number|search|email|url|password|tel|color)$/.test(el.type || '')) return;
       if (e.key === 't' || e.key === 'T') {
         e.preventDefault();
-        box.hidden = !box.hidden;
-        msgEl.textContent = box.hidden ? '已收起（按 T 再打开）' : '调参面板已打开';
+        toggle(store);            // 第一次按 = 建出来并显示，之后再按就是收起 / 展开
       }
-    }
-
-    document.body.appendChild(box);
-    window.addEventListener('keydown', toggle);
-    status();
-    return box;
+    });
   }
 
-  FW.tuneUi = { mount: mount };
+  FW.tuneUi = { mount: mount, toggle: toggle, bindKeys: bindKeys };
 })(globalThis.FW || (globalThis.FW = {}));
