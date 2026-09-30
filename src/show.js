@@ -15,7 +15,7 @@
 
   var data = FW.data, Fw = FW.firework.Firework;
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
-  var STYLE_NAMES = data.STYLE_NAMES, drawnCost = data.drawnCost;
+  var drawnCost = data.drawnCost;
 
   //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
   //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
@@ -60,6 +60,7 @@
     densityCap: 2.0,                            // 每发规模上限（别让单发变成一颗巨型球）
     elementRatio: 0.6,                          // 元素表上限 = 预算 × 这个
     xSpread: 0.42, drift: 0.20, xLimit: 0.46,   // 发射点水平散布 / 横飘 / 硬边界
+    xBias: 1.0, yBias: 1.0,                     // 落点偏好：>1 往两侧/高处挤，<1 往中间/低处收
     yMin: 0.06, yMax: 0.46,                     // 爆心高度区间
     crowd: [[1.15, 0.25], [0.95, 0.40], [0.72, 0.65], [0.48, 1.0],
             [0.28, 1.5], [0.12, 2.2], [0, 3.0]]
@@ -108,25 +109,37 @@
     x = Math.max(-this.w / 2 + lim, Math.min(this.w / 2 - lim, x));
     y = Math.max(-this.h / 2 + 60, Math.min(this.h / 2 - 30, y));
     var rng = this.rng;
-    var style = rng.choice(STYLE_NAMES);
+    var style = data.pickStyle(rng);
     var launch = [x + rng.uniform(-14, 14), -this.h / 2 - 6];
     return this.spawn(style, launch, [x, y], data.randomPalette(rng));
   };
 
+  /**
+   * 落点偏好（ORCH.xBias / yBias）：把 [-scale, scale] 上的均匀量先归一化，再取幂 ——
+   * b < 1 往中间挤、b > 1 往两端靠。b === 1 时**原样返回**，所以默认档走的还是原来那条
+   * 式子（一位都不差），只有真去拖那个滑条才会换映射。
+   */
+  function bias(v, b, scale) {
+    if (b === 1) return v;
+    return Math.sign(v) * Math.pow(Math.abs(v) / scale, b) * scale;
+  }
+
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;
-    var x0 = rng.uniform(-ORCH.xSpread, ORCH.xSpread) * this.w;
+    var x0 = bias(rng.uniform(-ORCH.xSpread, ORCH.xSpread), ORCH.xBias, ORCH.xSpread) * this.w;
     var x1 = Math.max(-ORCH.xLimit * this.w,
                       Math.min(ORCH.xLimit * this.w, x0 + rng.uniform(-ORCH.drift, ORCH.drift) * this.w));
-    var y1 = rng.uniform(ORCH.yMin, ORCH.yMax) * this.h;   // 中上部炸开
+    // 中上部炸开；yBias 让爆心整体偏低或偏高（默认 1 = 原来的均匀分布）
+    var uy = rng.uniform(0, 1);
+    var y1 = (ORCH.yMin + (ORCH.yMax - ORCH.yMin) * bias(uy, ORCH.yBias, 1)) * this.h;
     return [[x0, -this.h / 2 - 6], [x1, y1]];
   };
 
   Show.prototype.spawnRandom = function (n) {
     for (var i = 0; i < n; i++) {
       if (this.full() || this.elements.length > this.elementCap()) return;
-      var style = this.rng.choice(STYLE_NAMES);         // 已经画不完了，这波先不放
+      var style = data.pickStyle(this.rng);             // 已经画不完了，这波先不放
       var lb = this.randomLaunch();
       this.spawn(style, lb[0], lb[1], data.randomPalette(this.rng));
     }

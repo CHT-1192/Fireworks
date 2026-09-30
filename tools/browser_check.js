@@ -927,6 +927,46 @@ async function checkTune(browser) {
   if (!hide1 || hide2) problems.push(`T 键收起/打开不工作：${hide1} / ${hide2}`);
   steps.push('T 键：收起 -> 再打开 ✓');
 
+  // F8) 权重：0 = 真的不出现；只落在 fw.tune 里；复位要能清回去
+  await drag('stylew.willow', 0);
+  await drag('stylew.spoke', 5);
+  const weighted = await page.evaluate(() => {
+    const rng = new FW.rng.Random(3), c = {};
+    for (let i = 0; i < 300; i++) {
+      const st = FW.data.pickStyle(rng);
+      c[st] = (c[st] || 0) + 1;
+    }
+    return {
+      counts: c, willow: FW.data.STYLE_W.willow, spoke: FW.data.STYLE_W.spoke,
+      stored: JSON.parse(localStorage.getItem('fw.tune') || '{}'),
+      groups: Array.from(document.querySelectorAll('#tune h2')).map((e) => e.textContent),
+      sliders: document.querySelectorAll('#tune input[title^="stylew."]').length,
+      changed: FW.tune.changed()
+    };
+  });
+  if (weighted.willow !== 0 || weighted.spoke !== 5) {
+    problems.push('权重滑条没改到真身上：' + JSON.stringify(weighted));
+  }
+  if (weighted.counts.willow) {
+    problems.push('权重 0 的花型还是出现了：' + JSON.stringify(weighted.counts));
+  }
+  if (weighted.groups.indexOf('权重') < 0 || weighted.sliders !== 5) {
+    problems.push('面板里没有「权重」组 / 花型权重不是 5 条：' + JSON.stringify(weighted));
+  }
+  if (weighted.stored['stylew.willow'] !== 0 || weighted.stored['stylew.spoke'] !== 5) {
+    problems.push('权重没落盘：' + JSON.stringify(weighted.stored));
+  }
+  await page.click('#tune-reset');
+  await page.waitForTimeout(150);
+  const wBack = await page.evaluate(() => ({
+    willow: FW.data.STYLE_W.willow, spoke: FW.data.STYLE_W.spoke, changed: FW.tune.changed()
+  }));
+  if (wBack.willow !== 1 || wBack.spoke !== 1 || wBack.changed !== 0) {
+    problems.push('复位没把权重清回默认：' + JSON.stringify(wBack));
+  }
+  steps.push(`权重：垂柳 0 / 辐条 5 之后 300 次抽签里垂柳 ${weighted.counts.willow || 0} 次`
+    + `（${JSON.stringify(weighted.counts)}），复位回 1`);
+
   const crash = logs.filter((x) => /Uncaught|TypeError|ReferenceError/.test(x));
   if (crash.length) problems.push('调参页面控制台报错：' + crash[0].slice(0, 90));
   await page.close();

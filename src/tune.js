@@ -74,6 +74,16 @@
     });
   });
 
+  // 权重（"抽到哪个"的概率）：花型出现率、配色三种套路的分量、落点偏好
+  var R_STYLEW = root('stylew', FW.data.STYLE_W);
+  FW.data.STYLE_NAMES.forEach(function (name) {
+    add(R_STYLEW, name, (STYLE_CN[name] || name) + ' · ' + name, '权重', 0, 10, 1, true);
+  });
+  var R_PALW = root('palettew', FW.data.PALETTE_W);
+  add(R_PALW, 'same', '配色 · 同色系', '权重', 0, 100, 1, true);
+  add(R_PALW, 'clash', '配色 · 冷暖撞色', '权重', 0, 100, 1, true);
+  add(R_PALW, 'near', '配色 · 邻近色', '权重', 0, 100, 1, true);
+
   var R_DENSE = root('dense', FW.data.DENSE);
   add(R_DENSE, 'spark', '火花轨迹采样上限（段）', '画面', 2, 40, 1, true);
   add(R_DENSE, 'trail', '发射尾迹采样上限（段）', '画面', 2, 120, 1, true);
@@ -92,6 +102,9 @@
   add(R_ORCH, 'xLimit', '爆心横向硬边界', '编排', 0, 1, 0.01, false);
   add(R_ORCH, 'yMin', '爆心高度 下限', '编排', 0, 0.9, 0.01, true);
   add(R_ORCH, 'yMax', '爆心高度 上限', '编排', 0, 0.9, 0.01, true);
+  // 落点偏好 = 分布指数：1 均匀、<1 往两端/高处、>1 向中间/低处（见面板上「权重」那行说明）
+  add(R_ORCH, 'xBias', '水平分布指数', '权重', 0.2, 3, 0.05, true);
+  add(R_ORCH, 'yBias', '高度分布指数', '权重', 0.2, 3, 0.05, true);
   add(R_ORCH, 'firstFinaleMin', '开播后第一波齐射 最早', '编排', 2, 60, 0.5, false);
   add(R_ORCH, 'firstFinaleMax', '开播后第一波齐射 最晚', '编排', 2, 60, 0.5, false);
   FW.show.ORCH.crowd.forEach(function (band, i) {

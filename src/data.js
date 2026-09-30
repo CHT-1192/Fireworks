@@ -21,15 +21,24 @@
   var MATRIX = Palette('matrix', hsv(1 / 3, 1.0, 1.0), hsv(1 / 3, 1.0, 0.5),
                        hsv(1 / 3, 1.0, 0.5), hsv(1 / 3, 0.2, 1.0));
 
-  /** 随机配色：同色系 / 冷暖撞色 / 互补色，三种套路（取值顺序要与 Python 一致）。 */
+  /**
+   * 三种配色套路的分量（默认 30/42/28 —— 就是原来写死的 0.30 / 0.72 两个阈值）。
+   * 面板可以改（见 src/tune.js 的「权重」组）。注意 30/100 与 0.30 是**同一个双精度数**，
+   * 所以默认值下的分支与改之前一位都不差（40/72 之类改了分量才换比例）。
+   */
+  var PALETTE_W = { same: 30, clash: 42, near: 28 };
+
+  /** 随机配色：同色系 / 冷暖撞色 / 邻近色，三种套路（取值顺序要与 Python 一致）。 */
   function randomPalette(rng) {
     var h = rng.random(), roll = rng.random();
     var dot, ray, stem;
-    if (roll < 0.30) {                                   // 同色系
+    var wt = PALETTE_W, total = wt.same + wt.clash + wt.near;
+    if (!(total > 0)) total = 100;                       // 三个都是 0：当默认，别抽出 NaN
+    if (roll < wt.same / total) {                        // 同色系
       dot = hsv(h, rng.uniform(0.85, 1.0), 1.0);
       ray = hsv(h, 1.0, rng.uniform(0.45, 0.72));
       stem = hsv(h, 1.0, rng.uniform(0.70, 0.95));
-    } else if (roll < 0.72) {                            // 冷暖撞色
+    } else if (roll < (wt.same + wt.clash) / total) {    // 冷暖撞色
       dot = hsv(h, rng.uniform(0.85, 1.0), 1.0);
       ray = hsv(h + 0.5 + rng.uniform(-0.09, 0.09), 0.95, rng.uniform(0.72, 0.95));
       stem = hsv(h + rng.uniform(-0.05, 0.05), 1.0, rng.uniform(0.85, 1.0));
@@ -108,10 +117,37 @@
   };
   var STYLE_NAMES = Object.keys(STYLES);
 
+  /**
+   * 花型出现概率（权重）：默认全是 1 = 等概率 = 与移植时一模一样；0 = 这一型不出现。
+   * 抽签统一走下面的 pickStyle()，**默认权重时它仍然只调一次 rng.choice()**，所以
+   * 同种子还是同一场（行为基线与分享出去的链接都不受影响）；一旦动了权重，这一场的
+   * 随机流就变了 —— 那是"换了一场"，面板里写明了这件事。
+   */
+  var STYLE_W = { spoke: 1, cloud: 1, ring: 1, willow: 1, palm: 1 };
+
+  function weightedStyle(rng) {
+    var i, n = STYLE_NAMES.length, total = 0, w = new Array(n);
+    for (i = 0; i < n; i++) { w[i] = STYLE_W[STYLE_NAMES[i]] || 0; total += w[i]; }
+    if (!(total > 0)) return null;                       // 全 0：交给调用方退回等概率
+    var roll = rng.uniform(0, total);
+    for (i = 0; i < n; i++) { roll -= w[i]; if (roll < 0) return STYLE_NAMES[i]; }
+    return STYLE_NAMES[n - 1];
+  }
+
+  /** 按权重抽一个花型（默认权重 = 原来的等概率，一位都不差）。 */
+  function pickStyle(rng) {
+    var i;
+    for (i = 0; i < STYLE_NAMES.length; i++) {
+      if (STYLE_W[STYLE_NAMES[i]] !== 1) return weightedStyle(rng) || rng.choice(STYLE_NAMES);
+    }
+    return rng.choice(STYLE_NAMES);
+  }
+
   FW.data = {
     Palette: Palette, HALLOWEEN: HALLOWEEN, MATRIX: MATRIX, randomPalette: randomPalette,
     DOT: DOT, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS,
     geo: geo, pathGeo: pathGeo, drawnCost: drawnCost, DENSE: DENSE,
-    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES
+    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES,
+    STYLE_W: STYLE_W, PALETTE_W: PALETTE_W, pickStyle: pickStyle
   };
 })(globalThis.FW || (globalThis.FW = {}));

@@ -510,10 +510,127 @@ if (ar.applied !== 1 || ar.ignored !== 1 || Math.abs(T.get('phys.flashLife') - 0
 if (T.applyJson('{oops').ignored !== -1) tuneProblems.push('JSON 解析失败应当报 -1');
 T.reset(tstore);
 if (T.changed() !== 0) tuneProblems.push('收尾没复位干净');
+// 权重那几棵根也登记在案：复位要能一起清回去
+FW.data.STYLE_W.spoke = 7;
+FW.data.PALETTE_W.same = 99;
+FW.show.ORCH.xBias = 2.5;
+if (T.changed() !== 3) tuneProblems.push('权重不在参数表里（改动数 ' + T.changed() + '）');
+T.reset(tstore);
+if (T.changed() !== 0 || FW.data.STYLE_W.spoke !== 1
+    || FW.data.PALETTE_W.same !== 30 || FW.show.ORCH.xBias !== 1) {
+  tuneProblems.push('复位没有把权重清回默认');
+}
 
 // 3.8 分享链接里不带调参（别人打开必须是默认档）
 const tuneApp = makeApp('seed=7&tune=1');
 if (/tune/.test(tuneApp.shareUrl())) tuneProblems.push('分享链接里带了 tune：' + tuneApp.shareUrl());
+
+// 3.9 权重（花型出现率 / 配色套路分量 / 落点偏好）：
+//   * 默认档必须与改之前**等价**（花型走同一条 choice、配色阈值是同一个双精度数），
+//     所以同一个种子还是同一场 —— 这条由 npm run baseline 全程守着，这里再点一下要害；
+//   * 改了权重就是"换了一场"：0 要真的一次都不出现，重的要明显更多；
+//   * 落点偏好默认 1 必须是**原样返回**（不能只是"看起来差不多"）。
+{
+  const r1 = new FW.rng.Random(7), r2 = new FW.rng.Random(7);
+  let parity = true;
+  for (let i = 0; i < 60 && parity; i++) {
+    const a = FW.data.pickStyle(r1);
+    const b = FW.data.STYLE_NAMES[r2.randbelow(FW.data.STYLE_NAMES.length)];
+    if (a !== b) parity = false;
+  }
+  for (let i = 0; i < 20 && parity; i++) if (r1.random() !== r2.random()) parity = false;
+  if (!parity) tuneProblems.push('默认权重下 pickStyle 与等概率 choice 不等价（会改掉同种子的那一场）');
+}
+{
+  const W = FW.data.STYLE_W;
+  W.spoke = 8; W.willow = 0;
+  const rng = new FW.rng.Random(42), c = {};
+  for (let i = 0; i < 800; i++) {
+    const st = FW.data.pickStyle(rng);
+    c[st] = (c[st] || 0) + 1;
+  }
+  const others = Math.max(c.cloud || 0, c.ring || 0, c.palm || 0);
+  if (c.willow) tuneProblems.push(`权重 0 的垂柳还出现了 ${c.willow} 次`);
+  if (!(c.spoke > others * 2)) {
+    tuneProblems.push(`权重 8 的辐条没有明显更多：${JSON.stringify(c)}`);
+  }
+  Object.keys(W).forEach((k) => { W[k] = 0; });          // 全 0：退回等概率，别抽出空
+  if (!FW.data.pickStyle(new FW.rng.Random(3))) tuneProblems.push('权重全 0 时应当退回等概率');
+  Object.keys(W).forEach((k) => { W[k] = 1; });
+}
+{
+  // 配色：默认 30/42/28 与原来的 0.30 / 0.72 必须是同一个双精度数
+  if (30 / 100 !== 0.3 || 72 / 100 !== 0.72) {
+    tuneProblems.push('配色的默认分量没有与原来的 0.30 / 0.72 重合');
+  }
+  const hueOf = (c) => {                                  // hsv() 返回的是 RGB，这里反推色相
+    const mx = Math.max(c[0], c[1], c[2]), mn = Math.min(c[0], c[1], c[2]), d = mx - mn;
+    if (d === 0) return 0;
+    let h;
+    if (mx === c[0]) h = ((c[1] - c[2]) / d + 6) % 6;
+    else if (mx === c[1]) h = (c[2] - c[0]) / d + 2;
+    else h = (c[0] - c[1]) / d + 4;
+    return h / 6;
+  };
+  const schemeOf = (p) => {                               // 同色系 / 冷暖撞色(±0.5) / 邻近色(+0.06~0.16)
+    let d = hueOf(p.ray) - hueOf(p.dot);
+    d -= Math.round(d);
+    if (Math.abs(d) < 0.02) return 'same';
+    if (Math.abs(Math.abs(d) - 0.5) < 0.15) return 'clash';
+    return 'near';
+  };
+  const share = (n) => {
+    const rng = new FW.rng.Random(9), c = { same: 0, clash: 0, near: 0 };
+    for (let i = 0; i < n; i++) c[schemeOf(FW.data.randomPalette(rng))]++;
+    return c;
+  };
+  const d0 = share(600);
+  if (!(d0.same > d0.near && d0.clash > d0.near)) {
+    tuneProblems.push('默认分量下三种套路的比例不对：' + JSON.stringify(d0));
+  }
+  const W = FW.data.PALETTE_W;
+  W.same = 0; W.clash = 0; W.near = 100;
+  const d1 = share(300);
+  if (d1.same || d1.clash) {
+    tuneProblems.push('把邻近色调到 100 之后不该再出别的套路：' + JSON.stringify(d1));
+  }
+  W.same = 30; W.clash = 42; W.near = 28;
+}
+{
+  const O = FW.show.ORCH;
+  const xMean = (b) => {
+    O.xBias = b;
+    const show = new FW.show.Show(924, 691, new FW.rng.Random(7), { maxGeos: FW.show.DEFAULT_GEOS });
+    let sum = 0;
+    for (let i = 0; i < 400; i++) sum += Math.abs(show.randomLaunch()[0][0]);
+    return sum / 400;
+  };
+  const m1 = xMean(1), m3 = xMean(3), mHalf = xMean(0.5);
+  O.xBias = 1;
+  // 指数 1 = 均匀；>1 往中间收（平均 |x| 变小），<1 往两侧摊（变大）
+  if (!(m3 < m1 && mHalf > m1)) {
+    tuneProblems.push(`水平分布指数没起作用：3 -> ${m3.toFixed(1)} / 1 -> ${m1.toFixed(1)} / 0.5 -> ${mHalf.toFixed(1)}`);
+  }
+  const yMean = (b) => {
+    O.yBias = b;
+    const show = new FW.show.Show(924, 691, new FW.rng.Random(5), { maxGeos: FW.show.DEFAULT_GEOS });
+    let sum = 0;
+    for (let i = 0; i < 400; i++) sum += show.randomLaunch()[1][1];
+    return sum / 400;
+  };
+  const y1 = yMean(1), y3 = yMean(3), yHalf = yMean(0.5);
+  O.yBias = 1;
+  if (!(y3 < y1 && yHalf > y1)) {
+    tuneProblems.push(`高度分布指数没起作用：3 -> ${y3.toFixed(1)} / 1 -> ${y1.toFixed(1)} / 0.5 -> ${yHalf.toFixed(1)}`);
+  }
+  // bias = 1 必须是原样：第一个发射点要和 rng.uniform(-xSpread, xSpread) * w 完全相等
+  const rA = new FW.rng.Random(11), rB = new FW.rng.Random(11);
+  const sA = new FW.show.Show(924, 691, rA, { maxGeos: FW.show.DEFAULT_GEOS });
+  rB.uniform(O.firstFinaleMin, O.firstFinaleMax);         // 对齐构造时消耗的那一次
+  if (sA.randomLaunch()[0][0] !== rB.uniform(-O.xSpread, O.xSpread) * 924) {
+    tuneProblems.push('xBias=1 时发射点与原来的公式不相等（默认档被改动了）');
+  }
+}
 
 const starCount = T.controls().filter((c) => c.star).length;
 console.log('调参面板自检（参数表 / 默认值 / 落盘 / 复位）');
@@ -521,7 +638,7 @@ console.log('─'.repeat(76));
 if (tuneProblems.length) {
   for (const p of tuneProblems) console.log('  ✗ ' + p);
 } else {
-  console.log(`  OK   ${T.controls().length} 项参数（★ ${starCount} 项；面板按花型切换，同时展开 43 条滑条）默认值都在格子上；`
+  console.log(`  OK   ${T.controls().length} 项参数（★ ${starCount} 项；花型那 12 条按选择器切换）默认值都在格子上；`
     + `复位后指纹 ${defPrint} 与默认逐位一致；只落盘改过的项、认不出的键忽略`);
 }
 console.log('─'.repeat(76));

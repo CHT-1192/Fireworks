@@ -15,6 +15,13 @@
 
   var mounted = null;          // 已经建出来的那块面板（懒加载：没打开就没有节点）
 
+  // 哪一组需要额外解释一句（权重会影响随机流，得说清楚）
+  var NOTES = {
+    '权重': '只管"抽到哪个"：0 = 不出现。默认（花型全 1、配色 30/42/28、分布指数 1）与之前'
+         + '逐位一致；一改动，同一个种子就会放出不同的一场。分布指数 1 = 均匀，'
+         + '< 1 往两侧 / 往高处，> 1 向中间 / 往低处。'
+  };
+
   var CSS = [
     '#tune{position:fixed;right:12px;bottom:12px;z-index:5;width:330px;max-height:min(72vh,760px);',
     'overflow:auto;padding:12px;border-radius:14px;background:rgba(8,12,32,.88);',
@@ -170,12 +177,13 @@
       });
     }
 
-    ['编排', '拥挤度曲线', '发射', '爆心', '火花', '余烬', '发射尾迹', '音效', '画面']
+    ['权重', '编排', '拥挤度曲线', '发射', '爆心', '火花', '余烬', '发射尾迹', '音效', '画面']
       .forEach(function (group) {
         var star = T.group(group).filter(function (c) { return c.star; });
         if (!star.length) return;
         var sec = h('section');
         sec.appendChild(h('h2', null, group));
+        if (NOTES[group]) sec.appendChild(h('p', 'note', NOTES[group]));
         star.forEach(function (c) {
           var r = row(c, T, store, after);
           inputs[c.id] = r;

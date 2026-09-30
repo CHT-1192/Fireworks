@@ -536,15 +536,24 @@ setTimeout(function () {
   var MATRIX = Palette('matrix', hsv(1 / 3, 1.0, 1.0), hsv(1 / 3, 1.0, 0.5),
                        hsv(1 / 3, 1.0, 0.5), hsv(1 / 3, 0.2, 1.0));
 
-  /** 随机配色：同色系 / 冷暖撞色 / 互补色，三种套路（取值顺序要与 Python 一致）。 */
+  /**
+   * 三种配色套路的分量（默认 30/42/28 —— 就是原来写死的 0.30 / 0.72 两个阈值）。
+   * 面板可以改（见 src/tune.js 的「权重」组）。注意 30/100 与 0.30 是**同一个双精度数**，
+   * 所以默认值下的分支与改之前一位都不差（40/72 之类改了分量才换比例）。
+   */
+  var PALETTE_W = { same: 30, clash: 42, near: 28 };
+
+  /** 随机配色：同色系 / 冷暖撞色 / 邻近色，三种套路（取值顺序要与 Python 一致）。 */
   function randomPalette(rng) {
     var h = rng.random(), roll = rng.random();
     var dot, ray, stem;
-    if (roll < 0.30) {                                   // 同色系
+    var wt = PALETTE_W, total = wt.same + wt.clash + wt.near;
+    if (!(total > 0)) total = 100;                       // 三个都是 0：当默认，别抽出 NaN
+    if (roll < wt.same / total) {                        // 同色系
       dot = hsv(h, rng.uniform(0.85, 1.0), 1.0);
       ray = hsv(h, 1.0, rng.uniform(0.45, 0.72));
       stem = hsv(h, 1.0, rng.uniform(0.70, 0.95));
-    } else if (roll < 0.72) {                            // 冷暖撞色
+    } else if (roll < (wt.same + wt.clash) / total) {    // 冷暖撞色
       dot = hsv(h, rng.uniform(0.85, 1.0), 1.0);
       ray = hsv(h + 0.5 + rng.uniform(-0.09, 0.09), 0.95, rng.uniform(0.72, 0.95));
       stem = hsv(h + rng.uniform(-0.05, 0.05), 1.0, rng.uniform(0.85, 1.0));
@@ -623,11 +632,38 @@ setTimeout(function () {
   };
   var STYLE_NAMES = Object.keys(STYLES);
 
+  /**
+   * 花型出现概率（权重）：默认全是 1 = 等概率 = 与移植时一模一样；0 = 这一型不出现。
+   * 抽签统一走下面的 pickStyle()，**默认权重时它仍然只调一次 rng.choice()**，所以
+   * 同种子还是同一场（行为基线与分享出去的链接都不受影响）；一旦动了权重，这一场的
+   * 随机流就变了 —— 那是"换了一场"，面板里写明了这件事。
+   */
+  var STYLE_W = { spoke: 1, cloud: 1, ring: 1, willow: 1, palm: 1 };
+
+  function weightedStyle(rng) {
+    var i, n = STYLE_NAMES.length, total = 0, w = new Array(n);
+    for (i = 0; i < n; i++) { w[i] = STYLE_W[STYLE_NAMES[i]] || 0; total += w[i]; }
+    if (!(total > 0)) return null;                       // 全 0：交给调用方退回等概率
+    var roll = rng.uniform(0, total);
+    for (i = 0; i < n; i++) { roll -= w[i]; if (roll < 0) return STYLE_NAMES[i]; }
+    return STYLE_NAMES[n - 1];
+  }
+
+  /** 按权重抽一个花型（默认权重 = 原来的等概率，一位都不差）。 */
+  function pickStyle(rng) {
+    var i;
+    for (i = 0; i < STYLE_NAMES.length; i++) {
+      if (STYLE_W[STYLE_NAMES[i]] !== 1) return weightedStyle(rng) || rng.choice(STYLE_NAMES);
+    }
+    return rng.choice(STYLE_NAMES);
+  }
+
   FW.data = {
     Palette: Palette, HALLOWEEN: HALLOWEEN, MATRIX: MATRIX, randomPalette: randomPalette,
     DOT: DOT, PATH: PATH, DOT_SIDES: DOT_SIDES, DOT_PTS: DOT_PTS,
     geo: geo, pathGeo: pathGeo, drawnCost: drawnCost, DENSE: DENSE,
-    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES
+    STYLES: STYLES, STYLE_NAMES: STYLE_NAMES,
+    STYLE_W: STYLE_W, PALETTE_W: PALETTE_W, pickStyle: pickStyle
   };
 })(globalThis.FW || (globalThis.FW = {}));
 
@@ -1153,7 +1189,7 @@ setTimeout(function () {
 
   var data = FW.data, Fw = FW.firework.Firework;
   var HALLOWEEN = data.HALLOWEEN, MATRIX = data.MATRIX;
-  var STYLE_NAMES = data.STYLE_NAMES, drawnCost = data.drawnCost;
+  var drawnCost = data.drawnCost;
 
   //: 每帧绘制预算的默认值（基本图元数：折线按段算）。按实测选的：这个值下画面密度
   //: 与原版口径时期基本一致（元素峰值 72~119），但数字真正对应 canvas 的开销。
@@ -1198,6 +1234,7 @@ setTimeout(function () {
     densityCap: 2.0,                            // 每发规模上限（别让单发变成一颗巨型球）
     elementRatio: 0.6,                          // 元素表上限 = 预算 × 这个
     xSpread: 0.42, drift: 0.20, xLimit: 0.46,   // 发射点水平散布 / 横飘 / 硬边界
+    xBias: 1.0, yBias: 1.0,                     // 落点偏好：>1 往两侧/高处挤，<1 往中间/低处收
     yMin: 0.06, yMax: 0.46,                     // 爆心高度区间
     crowd: [[1.15, 0.25], [0.95, 0.40], [0.72, 0.65], [0.48, 1.0],
             [0.28, 1.5], [0.12, 2.2], [0, 3.0]]
@@ -1246,25 +1283,37 @@ setTimeout(function () {
     x = Math.max(-this.w / 2 + lim, Math.min(this.w / 2 - lim, x));
     y = Math.max(-this.h / 2 + 60, Math.min(this.h / 2 - 30, y));
     var rng = this.rng;
-    var style = rng.choice(STYLE_NAMES);
+    var style = data.pickStyle(rng);
     var launch = [x + rng.uniform(-14, 14), -this.h / 2 - 6];
     return this.spawn(style, launch, [x, y], data.randomPalette(rng));
   };
 
+  /**
+   * 落点偏好（ORCH.xBias / yBias）：把 [-scale, scale] 上的均匀量先归一化，再取幂 ——
+   * b < 1 往中间挤、b > 1 往两端靠。b === 1 时**原样返回**，所以默认档走的还是原来那条
+   * 式子（一位都不差），只有真去拖那个滑条才会换映射。
+   */
+  function bias(v, b, scale) {
+    if (b === 1) return v;
+    return Math.sign(v) * Math.pow(Math.abs(v) / scale, b) * scale;
+  }
+
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;
-    var x0 = rng.uniform(-ORCH.xSpread, ORCH.xSpread) * this.w;
+    var x0 = bias(rng.uniform(-ORCH.xSpread, ORCH.xSpread), ORCH.xBias, ORCH.xSpread) * this.w;
     var x1 = Math.max(-ORCH.xLimit * this.w,
                       Math.min(ORCH.xLimit * this.w, x0 + rng.uniform(-ORCH.drift, ORCH.drift) * this.w));
-    var y1 = rng.uniform(ORCH.yMin, ORCH.yMax) * this.h;   // 中上部炸开
+    // 中上部炸开；yBias 让爆心整体偏低或偏高（默认 1 = 原来的均匀分布）
+    var uy = rng.uniform(0, 1);
+    var y1 = (ORCH.yMin + (ORCH.yMax - ORCH.yMin) * bias(uy, ORCH.yBias, 1)) * this.h;
     return [[x0, -this.h / 2 - 6], [x1, y1]];
   };
 
   Show.prototype.spawnRandom = function (n) {
     for (var i = 0; i < n; i++) {
       if (this.full() || this.elements.length > this.elementCap()) return;
-      var style = this.rng.choice(STYLE_NAMES);         // 已经画不完了，这波先不放
+      var style = data.pickStyle(this.rng);             // 已经画不完了，这波先不放
       var lb = this.randomLaunch();
       this.spawn(style, lb[0], lb[1], data.randomPalette(this.rng));
     }
@@ -2900,6 +2949,16 @@ setTimeout(function () {
     });
   });
 
+  // 权重（"抽到哪个"的概率）：花型出现率、配色三种套路的分量、落点偏好
+  var R_STYLEW = root('stylew', FW.data.STYLE_W);
+  FW.data.STYLE_NAMES.forEach(function (name) {
+    add(R_STYLEW, name, (STYLE_CN[name] || name) + ' · ' + name, '权重', 0, 10, 1, true);
+  });
+  var R_PALW = root('palettew', FW.data.PALETTE_W);
+  add(R_PALW, 'same', '配色 · 同色系', '权重', 0, 100, 1, true);
+  add(R_PALW, 'clash', '配色 · 冷暖撞色', '权重', 0, 100, 1, true);
+  add(R_PALW, 'near', '配色 · 邻近色', '权重', 0, 100, 1, true);
+
   var R_DENSE = root('dense', FW.data.DENSE);
   add(R_DENSE, 'spark', '火花轨迹采样上限（段）', '画面', 2, 40, 1, true);
   add(R_DENSE, 'trail', '发射尾迹采样上限（段）', '画面', 2, 120, 1, true);
@@ -2918,6 +2977,9 @@ setTimeout(function () {
   add(R_ORCH, 'xLimit', '爆心横向硬边界', '编排', 0, 1, 0.01, false);
   add(R_ORCH, 'yMin', '爆心高度 下限', '编排', 0, 0.9, 0.01, true);
   add(R_ORCH, 'yMax', '爆心高度 上限', '编排', 0, 0.9, 0.01, true);
+  // 落点偏好 = 分布指数：1 均匀、<1 往两端/高处、>1 向中间/低处（见面板上「权重」那行说明）
+  add(R_ORCH, 'xBias', '水平分布指数', '权重', 0.2, 3, 0.05, true);
+  add(R_ORCH, 'yBias', '高度分布指数', '权重', 0.2, 3, 0.05, true);
   add(R_ORCH, 'firstFinaleMin', '开播后第一波齐射 最早', '编排', 2, 60, 0.5, false);
   add(R_ORCH, 'firstFinaleMax', '开播后第一波齐射 最晚', '编排', 2, 60, 0.5, false);
   FW.show.ORCH.crowd.forEach(function (band, i) {
@@ -3108,6 +3170,13 @@ setTimeout(function () {
 
   var mounted = null;          // 已经建出来的那块面板（懒加载：没打开就没有节点）
 
+  // 哪一组需要额外解释一句（权重会影响随机流，得说清楚）
+  var NOTES = {
+    '权重': '只管"抽到哪个"：0 = 不出现。默认（花型全 1、配色 30/42/28、分布指数 1）与之前'
+         + '逐位一致；一改动，同一个种子就会放出不同的一场。分布指数 1 = 均匀，'
+         + '< 1 往两侧 / 往高处，> 1 向中间 / 往低处。'
+  };
+
   var CSS = [
     '#tune{position:fixed;right:12px;bottom:12px;z-index:5;width:330px;max-height:min(72vh,760px);',
     'overflow:auto;padding:12px;border-radius:14px;background:rgba(8,12,32,.88);',
@@ -3263,12 +3332,13 @@ setTimeout(function () {
       });
     }
 
-    ['编排', '拥挤度曲线', '发射', '爆心', '火花', '余烬', '发射尾迹', '音效', '画面']
+    ['权重', '编排', '拥挤度曲线', '发射', '爆心', '火花', '余烬', '发射尾迹', '音效', '画面']
       .forEach(function (group) {
         var star = T.group(group).filter(function (c) { return c.star; });
         if (!star.length) return;
         var sec = h('section');
         sec.appendChild(h('h2', null, group));
+        if (NOTES[group]) sec.appendChild(h('p', 'note', NOTES[group]));
         star.forEach(function (c) {
           var r = row(c, T, store, after);
           inputs[c.id] = r;
