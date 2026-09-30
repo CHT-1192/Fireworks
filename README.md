@@ -11,7 +11,7 @@
 | --- | --- |
 | **在线版** | <https://cht-1192.github.io/Fireworks/> |
 | **入口页** | <https://cht-1192.github.io/> —— 三个纯前端 Demo 的入口（另两个是 2D 光线追踪、网页版示波器） |
-| **离线单文件** | 下载 [dist/fireworks.html](dist/fireworks.html)，双击打开。133 KB，零外部请求 |
+| **离线单文件** | 下载 [dist/fireworks.html](dist/fireworks.html)，双击打开。164 KB，零外部请求 |
 | **自己跑开发版** | `npm start` → <http://127.0.0.1:9240/>（不需要 `npm install`） |
 
 ## 怎么玩
@@ -27,6 +27,7 @@
 | 全屏 | 「全屏」；Esc 退出 |
 | 画面太满 / 太空 | 拖「绘制预算」滑块（默认 450） |
 | 声音 | 「声音」开关。**没有一个音频文件**：发射、爆炸都是 Web Audio 现场合成的；浏览器要求先有一次点击/按键，所以第一次动手之后才会出声 |
+| 调参数 | 地址后面加 **`?tune=1`**：右下角出现调参面板（135 项参数 / 43 条滑条），按 **T** 收起或打开 |
 
 **种子是玩法的一半。** `?seed=7` 这样的数字种子每次都会放出同一场，可以贴在链接里发人。
 
@@ -57,6 +58,23 @@
 - **读屏**：画面（canvas）对读屏是一个有名字的图；操作会在视觉隐藏的 `role="status"` 区域播报（暂停 / 换种子 / 音效开关 / 插播 / 链接已复制…），但**不逐发播报烟花** —— 那是装饰
 - 表单都有真的 `label`（种子、绘制预算），HUD 那种每半秒变一次的数字对读屏隐藏
 
+## 调参面板（`?tune=1`）
+
+想改手感不必动代码：地址后面加 `?tune=1`（比如 <https://cht-1192.github.io/Fireworks/?tune=1>），
+右下角会出现一块面板 —— 135 项参数里常用的 43 条直接展开成滑条，其余的都在下面「全部参数（JSON）」里。
+
+![调参面板](docs/preview/tune.png)
+
+- **改了立刻看**：花型、节奏、物理、音效都是**原地读**的，改完按「放一发」或「重放」就是新样子
+  （背景色、电平、低通、减少动效降幅这几项是"当场"生效）
+- **只有 `?tune=1` 才认**：调参结果记在 `localStorage` 的 `fw.tune` 里，而且**只存改过的那几项**。
+  不带 `?tune=1` 打开的页面永远是默认档 —— 分享链接、别人打开的样子都不受影响
+- **复位全部**把值和那份存储一起清回默认；**复制改动 JSON** 得到一份
+  `{"styles.spoke.life": 2.6, ...}` 清单
+- **调好了想固化成默认**：把清单里的值写回对应模块（`show.js` 的 `ORCH`、`elements.js` 的 `PHYS`、
+  `firework.js` 的 `CFG`、`sound.js` 的 `BUDGET`/`CRISP`/`TONE`、`data.js` 的 `STYLES`、
+  `view.js` 的 `BG`），再按一次「复位全部」即可 —— 默认值始终只住在源码里
+
 ## 给开发者
 
 这一版是**维护版**：由 `turtle_fireworks.py`（Python + turtle，1171 行）移植而来。原版受
@@ -73,7 +91,7 @@ npm i && npm run browser   # 真浏览器端到端自检（Playwright 驱动系�
 | 文档 | 内容 |
 | --- | --- |
 | [docs/checks.md](docs/checks.md) | 三层校验（行为基线 / Node 自检 / 真浏览器）、实测证据、模块地图与目录 |
-| [docs/design.md](docs/design.md) | 设计取舍：尾迹为什么用描边、绘制预算为什么是"容量"、为什么固定步长 |
+| [docs/design.md](docs/design.md) | 设计取舍：尾迹为什么用描边、绘制预算为什么是"容量"、为什么固定步长、调参面板为什么只改引用 |
 | [docs/usage.md](docs/usage.md) | 全部按钮与快捷键、URL 参数、录制细节、GitHub Pages 托管 |
 | [docs/styles.md](docs/styles.md) | 花型参数表（`npm run docs` 从源码生成，含"怎么加一个花型"） |
 

@@ -117,7 +117,12 @@ function stubWindow(w, h, dpr) {
 /** 仿真 + 渲染器 + 应用核心一起加载（这三者都不需要 DOM；ui.js 才需要）。 */
 function loadWithRenderer() {
   const FW = loadSim();
-  for (const f of ['view.js', 'app.js', 'ebml.js', 'pngmeta.js']) {
+  // 纯计算模块之外，再把"不碰 DOM 就行"的都装上：view/app（渲染与主循环）、
+  // ebml/pngmeta（元数据）、sound/sound_kit（音效合成）、tune（调参参数表）。
+  // tune_ui.js / ui.js 也只是在加载时定义函数（DOM 只在 mount/boot 里碰），
+  // 所以顺手一起装，等于把"模块加载"这条路径也覆盖到。
+  for (const f of ['view.js', 'app.js', 'ebml.js', 'pngmeta.js',
+                   'sound.js', 'sound_kit.js', 'tune.js', 'tune_ui.js']) {
     vm.runInThisContext(fs.readFileSync(path.join(ROOT, 'src', f), 'utf8'),
                         { filename: 'src/' + f });
   }

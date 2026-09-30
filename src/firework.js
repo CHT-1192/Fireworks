@@ -12,18 +12,23 @@
   var mix = core.mix, fade = core.fade, pyRound = core.pyRound;
   var STYLES = data.STYLES;
 
-  var ROCKET_G = 520.0;                 // 上升段重力（决定发射速度与上升时间）
-
   /**
-   * 爆心那簇碎屑的开关（全部都在这里，方便调）：
-   *   seconds  炸开之后还撒多久 —— 过了就再也不往爆心补粒子
-   *   interval 撒的间隔（0.012s ≈ 80 颗/秒，一簇二十来颗）
-   *   size     每颗的半径（比上升段那几颗显眼，才撑得起"爆炸特效"）
-   *   life     每颗自己的寿命
-   * "炸开有粒子特效、炸完立刻消失"就靠这几个数：最后一个粒子最晚在
-   * seconds + life[1] = 0.6s 之后消失。
+   * 一发烟花的可调参数（**整体可调**，见调参面板 src/tune.js）：
+   *   rocketG    上升段重力（决定发射速度与上升时间）
+   *   flashSize  爆心闪光半径的取值区间（炸开那一下的亮团）
+   *   riseEmber* 上升段沿路撒的火星（间隔 / 大小 / 寿命）
+   *   puff       爆心那簇碎屑：seconds 炸开后还撒多久（过了就再也不往爆心补粒子）、
+   *              interval 撒的间隔（0.012s ≈ 80 颗/秒）、size 每颗半径（比上升段
+   *              那几颗显眼才撑得起"爆炸特效"）、life 每颗自己的寿命。
+   *              "炸开有粒子特效、炸完立刻消失"就靠这几个数：最后一个粒子最晚在
+   *              seconds + life[1] = 0.6s 之后消失。
    */
-  var BURST_PUFF = { seconds: 0.18, interval: 0.012, size: 3.6, life: [0.2, 0.42] };
+  var CFG = {
+    rocketG: 520.0,
+    flashSize: [26, 40],
+    riseEmberSec: 0.07, riseEmberSize: 2.2, riseEmberLife: [0.3, 0.7],
+    puff: { seconds: 0.18, interval: 0.012, size: 3.6, life: [0.2, 0.42] }
+  };
 
   function Firework(show, style, palette, launch, burst, rng, o) {
     o = o || {};
@@ -35,8 +40,8 @@
     this.x0 = launch[0]; this.y0 = launch[1];
     this.x1 = burst[0]; this.y1 = burst[1];
     this.x = this.x0; this.y = this.y0;
-    this.vy = Math.sqrt(Math.max(1.0, 2 * ROCKET_G * (this.y1 - this.y0)));
-    this.vx = (this.x1 - this.x0) / Math.max(1e-3, this.vy / ROCKET_G);
+    this.vy = Math.sqrt(Math.max(1.0, 2 * CFG.rocketG * (this.y1 - this.y0)));
+    this.vx = (this.x1 - this.x0) / Math.max(1e-3, this.vy / CFG.rocketG);
     this.phase = 'rise';
     this.children = [];
     // 发射尾迹：头端白热、尾端是凉掉的红
@@ -63,7 +68,7 @@
   /**
    * 上升段：推进弹体、喂尾迹、撒几颗余烬；炸开之后只负责爆心那一小簇碎屑。
    *
-   * 爆心碎屑（`BURST_PUFF`）：炸开那一下在爆点密撒一小簇，**只撒 0.18s**，每颗也只活
+   * 爆心碎屑（`CFG.puff`）：炸开那一下在爆点密撒一小簇，**只撒 0.18s**，每颗也只活
    * 0.15~0.35s，所以"炸开有粒子、炸完立刻干净"。教训写在下面这条 git 记录里：早先这个
    * 分支是每 0.09s 一颗、一直撒到发射尾迹淡完（3.4s），实测全部余烬的 56% 来自它，
    * 中心飘着一层不散的碎屑 —— 观感就是"烟花都爆完了粒子还在"。
@@ -73,27 +78,28 @@
   Firework.prototype.update = function (dt) {
     if (this.phase !== 'rise') {
       this.burstAge += dt;
-      if (this.burstAge >= BURST_PUFF.seconds) return;   // 窗口过了：爆心不再补粒子
+      if (this.burstAge >= CFG.puff.seconds) return;    // 窗口过了：爆心不再补粒子
       this.emberAcc += dt;
-      while (this.emberAcc > BURST_PUFF.interval) {
-        this.emberAcc -= BURST_PUFF.interval;
+      while (this.emberAcc > CFG.puff.interval) {
+        this.emberAcc -= CFG.puff.interval;
         this.show.add(new el.Ember(this.show, this.x, this.y,
                                    this.rng.uniform(-70, 70), this.rng.uniform(-40, 80),
-                                   this.palette.core, BURST_PUFF.size,
-                                   this.rng.uniform(BURST_PUFF.life[0], BURST_PUFF.life[1])));
+                                   this.palette.core, CFG.puff.size,
+                                   this.rng.uniform(CFG.puff.life[0], CFG.puff.life[1])));
       }
       return;
     }
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-    this.vy -= ROCKET_G * dt;
+    this.vy -= CFG.rocketG * dt;
     this.trail.push(this.x, this.y);                    // 把真实路径喂给尾迹
     this.emberAcc += dt;
-    if (this.emberAcc > 0.07) {                         // 上升时撒一点火星
+    if (this.emberAcc > CFG.riseEmberSec) {             // 上升时撒一点火星
       this.emberAcc = 0.0;
       this.show.add(new el.Ember(this.show, this.x, this.y - 6,
                                  this.rng.uniform(-10, 10), -this.rng.uniform(20, 60),
-                                 this.palette.stem, 2.2, this.rng.uniform(0.3, 0.7)));
+                                 this.palette.stem, CFG.riseEmberSize,
+                                 this.rng.uniform(CFG.riseEmberLife[0], CFG.riseEmberLife[1])));
     }
     if (this.vy <= 0.0) {
       this.y = this.y1;
@@ -117,7 +123,8 @@
     else { rmin = spec.radius[0]; rmax = spec.radius[1]; }
     var drag = spec.drag;
     var cx = this.x, cy = this.y;
-    this.show.add(new el.Flash(this.show, cx, cy, pal, rng.uniform(26, 40)));
+    this.show.add(new el.Flash(this.show, cx, cy, pal,
+                               rng.uniform(CFG.flashSize[0], CFG.flashSize[1])));
     // 同上：音效等 UI 层挂钩，只读不写，不影响这一场
     if (this.show.onEvent) {
       this.show.onEvent({ type: 'burst', style: this.style, x: cx, y: cy,
@@ -172,5 +179,5 @@
     return true;
   };
 
-  FW.firework = { Firework: Firework, ROCKET_G: ROCKET_G };
+  FW.firework = { Firework: Firework, CFG: CFG, ROCKET_G: CFG.rocketG };
 })(globalThis.FW || (globalThis.FW = {}));

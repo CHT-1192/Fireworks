@@ -223,11 +223,12 @@
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记三个键：上次的种子 / "每日"开关 / "声音"开关（隐私模式下会抛错，都包起来）。 */
+  /** localStorage 里记几个键：上次的种子 / "每日"开关 / "声音"开关 / 调参结果（隐私模式下会抛错，都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
-      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } }
+      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } },
+      remove: function (k) { try { localStorage.removeItem('fw.' + k); } catch (e) { /* 无所谓 */ } }
     };
   }
 
@@ -240,6 +241,10 @@
   function boot() {
     var st = store();
     var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    // 调参面板：只有 ?tune=1 才读存储里的那份改动（这样别人打开页面永远是默认档）。
+    // 必须在构造 App 之前读 —— 背景色 / 电平 / 低通 / 减少动效降幅都是"建的时候就取一次"。
+    var tuning = !!(FW.tune && FW.tune.wanted());
+    if (tuning) FW.tune.load(st);
     var inst = new FW.app.App({
       canvas: $('stage'),
       search: new URLSearchParams(location.search),
@@ -248,6 +253,7 @@
       reducedMotion: !!(mq && mq.matches)
     });
     FW.app.instance = inst;
+    if (tuning) FW.tuneUi.mount(st);
     if (mq) inst.bindReducedMotion(mq);
     inst.start();
     inst.syncPanel();                    // 声音开关的 aria 状态要一开始就对

@@ -1,7 +1,7 @@
 <!--
   烟花 · Fireworks —— 单文件版（由 npm run build 生成，请勿直接编辑）
   改动请改 index.html 与 src/*.js，然后重新 npm run build。
-  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> a11y.js -> ebml.js -> record.js -> pngmeta.js -> sound.js -> sound_kit.js -> actions.js -> ui.js
+  模块: core.js -> rng.js -> data.js -> elements.js -> trails.js -> firework.js -> show.js -> view.js -> app.js -> a11y.js -> ebml.js -> record.js -> pngmeta.js -> sound.js -> sound_kit.js -> actions.js -> tune.js -> tune_ui.js -> ui.js
   许可: Apache-2.0（见 LICENSE / NOTICE）
 -->
 <!doctype html>
@@ -649,6 +649,31 @@ setTimeout(function () {
   var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo;
   var DENSE = data.DENSE;
 
+  /**
+   * 元素的物理与画法参数（**整体可调**，见调参面板 src/tune.js）。
+   * 默认值就是原来写死在各个方法里的那些数，一个都没动 —— 面板只改这个对象。
+   */
+  var PHYS = {
+    flashLife: 0.22,          // 爆心闪光寿命
+    flashFade: 1.6,           // 变暗曲线指数（越大越快暗下去）
+    flashShrink: [0.35, 0.65],// 边暗边缩：基础半径 + 随亮度收缩的部分
+    emberGravity: 150.0,      // 余烬下坠
+    emberDrag: 0.8,           // 余烬横向阻尼
+    emberTwinkleAt: 0.75,     // 出生时随机数大于它 -> 这颗余烬会闪
+    emberTwinkleHz: 22.0,
+    emberSize: [0.4, 0.6],    // 余烬半径 = size × (这个)
+    emberLife: [0.5, 1.3],    // 火花掉下来的余烬寿命
+    emberSizeK: 0.42,         // 火花掉下来的余烬大小（× 火花半径）
+    sparkTrailStep: 12.0,     // 轨迹采样步长（像素）：够远了才记一个点
+    sparkShade: 0.8,          // 火花变暗曲线指数
+    sparkTwinkleBelow: 0.34,  // 亮度掉到这个比例以下才可能闪
+    sparkTwinkleChance: 0.35,
+    sparkTrailWidth: 0.16,    // 尾迹半宽 = 火花半径 × 这个
+    trailFade: 3.4,           // 发射尾迹（弹体烟迹）整条散掉要多久
+    trailStep: 9.0,           // 尾迹采样步长
+    trailMaxPts: 80
+  };
+
   /* ------------------------------------------------------------ 基类 */
 
   function Element(show) {
@@ -666,7 +691,7 @@ setTimeout(function () {
     this.size = size === undefined ? 34.0 : size;
     this.palette = palette;
     this.age = 0.0;
-    this.life = 0.22;
+    this.life = PHYS.flashLife;
   }
   Flash.prototype = Object.create(Element.prototype);
   Flash.prototype.constructor = Flash;
@@ -678,8 +703,9 @@ setTimeout(function () {
 
   Flash.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);   // 死亡那帧 age 会略微超过 life
-    var r = Math.max(0.5, this.size * (0.35 + 0.65 * k) * Math.sqrt(k));  // 边暗边缩
-    return [geo(DOT, fade(this.palette.core, Math.pow(k, 1.6)), this.x, this.y, 0.0, r, r)];
+    var shrink = PHYS.flashShrink;
+    var r = Math.max(0.5, this.size * (shrink[0] + shrink[1] * k) * Math.sqrt(k));
+    return [geo(DOT, fade(this.palette.core, Math.pow(k, PHYS.flashFade)), this.x, this.y, 0.0, r, r)];
   };
 
   /* ------------------------------------------------ 余烬：掉下来的小碎屑 */
@@ -699,8 +725,8 @@ setTimeout(function () {
 
   Ember.prototype.update = function (dt) {
     this.age += dt;
-    this.vy -= 150.0 * dt;
-    this.vx *= Math.exp(-0.8 * dt);
+    this.vy -= PHYS.emberGravity * dt;
+    this.vx *= Math.exp(-PHYS.emberDrag * dt);
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     if (this.age >= this.life) this.alive = false;
@@ -708,8 +734,11 @@ setTimeout(function () {
 
   Ember.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);
-    if (this.twinkle > 0.75) k *= 0.35 + 0.65 * Math.abs(Math.sin(this.age * 22.0));
-    var r = Math.max(0.5, this.size * (0.4 + 0.6 * k));
+    var es = PHYS.emberSize;
+    if (this.twinkle > PHYS.emberTwinkleAt) {
+      k *= 0.35 + 0.65 * Math.abs(Math.sin(this.age * PHYS.emberTwinkleHz));
+    }
+    var r = Math.max(0.5, this.size * (es[0] + es[1] * k));
     return [geo(DOT, fade(this.color, k), this.x, this.y, 0.0, r, r)];
   };
 
@@ -737,7 +766,7 @@ setTimeout(function () {
     this.drag = o.drag;
     this.trailTime = o.trailTime === undefined ? 0.0 : o.trailTime;
     this.trailSeg = Math.max(1, o.trailSeg === undefined ? 3 : o.trailSeg);
-    this.trailStep = o.trailStep === undefined ? 12.0 : o.trailStep;
+    this.trailStep = o.trailStep === undefined ? PHYS.sparkTrailStep : o.trailStep;
     this.emberRate = o.emberRate === undefined ? 0.0 : o.emberRate;
     this.twinkle = o.twinkle === undefined ? true : o.twinkle;
     this.emberAcc = 0.0;
@@ -773,8 +802,8 @@ setTimeout(function () {
         this.show.add(new Ember(this.show, this.x, this.y,
                                 this.vx * 0.25 + this.show.rng.uniform(-14, 14),
                                 this.vy * 0.2 + this.show.rng.uniform(-10, 6),
-                                this.trailHot, this.size * 0.42,
-                                this.show.rng.uniform(0.5, 1.3)));
+                                this.trailHot, this.size * PHYS.emberSizeK,
+                                this.show.rng.uniform(PHYS.emberLife[0], PHYS.emberLife[1])));
       }
     }
     if (this.age >= this.life) this.alive = false;
@@ -790,15 +819,16 @@ setTimeout(function () {
       var age = now - (a[2] + b[2]) * 0.5;
       var fresh = Math.max(0.0, 1.0 - age / this.trailTime) * (0.35 + 0.65 * shade);
       segs.push([a[0], a[1], b[0], b[1], mix(this.trailCool, this.trailHot, fresh),
-                 Math.max(0.5, this.size * 0.16 * (0.5 + 0.5 * fresh))]);
+                 Math.max(0.5, this.size * PHYS.sparkTrailWidth * (0.5 + 0.5 * fresh))]);
     }
     return segs;
   };
 
   Spark.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);
-    var shade = Math.pow(k, 0.8);                         // 变暗曲线
-    if (this.twinkle && k < 0.34 && this.show.rng.random() < 0.35) {
+    var shade = Math.pow(k, PHYS.sparkShade);             // 变暗曲线
+    if (this.twinkle && k < PHYS.sparkTwinkleBelow
+        && this.show.rng.random() < PHYS.sparkTwinkleChance) {
       shade *= this.show.rng.uniform(0.15, 1.0);          // 末期随机闪烁
     }
     var geos = [];
@@ -815,7 +845,7 @@ setTimeout(function () {
     return geos;
   };
 
-  FW.elements = { Element: Element, Flash: Flash, Ember: Ember, Spark: Spark };
+  FW.elements = { Element: Element, Flash: Flash, Ember: Ember, Spark: Spark, PHYS: PHYS };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/trails.js ===================== */
@@ -830,7 +860,7 @@ setTimeout(function () {
   var core = FW.core, data = FW.data, el = FW.elements;
   var fade = core.fade, mix = core.mix, decimate = core.decimate;
   var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo, DENSE = data.DENSE;
-  var Element = el.Element;
+  var Element = el.Element, PHYS = el.PHYS;
 
   /* ------------------------------------------ 弹体：白热的头 + 身后一点火星 */
 
@@ -863,9 +893,9 @@ setTimeout(function () {
     this.width = o.width;
     this.hot = o.hot;
     this.cool = o.cool;
-    this.fadeTime = o.fadeTime === undefined ? 3.4 : o.fadeTime;
-    this.minStep = o.minStep === undefined ? 9.0 : o.minStep;
-    this.maxPts = o.maxPts === undefined ? 80 : o.maxPts;
+    this.fadeTime = o.fadeTime === undefined ? PHYS.trailFade : o.fadeTime;
+    this.minStep = o.minStep === undefined ? PHYS.trailStep : o.minStep;
+    this.maxPts = o.maxPts === undefined ? PHYS.trailMaxPts : o.maxPts;
   }
   Trail.prototype = Object.create(Element.prototype);
   Trail.prototype.constructor = Trail;
@@ -934,18 +964,23 @@ setTimeout(function () {
   var mix = core.mix, fade = core.fade, pyRound = core.pyRound;
   var STYLES = data.STYLES;
 
-  var ROCKET_G = 520.0;                 // 上升段重力（决定发射速度与上升时间）
-
   /**
-   * 爆心那簇碎屑的开关（全部都在这里，方便调）：
-   *   seconds  炸开之后还撒多久 —— 过了就再也不往爆心补粒子
-   *   interval 撒的间隔（0.012s ≈ 80 颗/秒，一簇二十来颗）
-   *   size     每颗的半径（比上升段那几颗显眼，才撑得起"爆炸特效"）
-   *   life     每颗自己的寿命
-   * "炸开有粒子特效、炸完立刻消失"就靠这几个数：最后一个粒子最晚在
-   * seconds + life[1] = 0.6s 之后消失。
+   * 一发烟花的可调参数（**整体可调**，见调参面板 src/tune.js）：
+   *   rocketG    上升段重力（决定发射速度与上升时间）
+   *   flashSize  爆心闪光半径的取值区间（炸开那一下的亮团）
+   *   riseEmber* 上升段沿路撒的火星（间隔 / 大小 / 寿命）
+   *   puff       爆心那簇碎屑：seconds 炸开后还撒多久（过了就再也不往爆心补粒子）、
+   *              interval 撒的间隔（0.012s ≈ 80 颗/秒）、size 每颗半径（比上升段
+   *              那几颗显眼才撑得起"爆炸特效"）、life 每颗自己的寿命。
+   *              "炸开有粒子特效、炸完立刻消失"就靠这几个数：最后一个粒子最晚在
+   *              seconds + life[1] = 0.6s 之后消失。
    */
-  var BURST_PUFF = { seconds: 0.18, interval: 0.012, size: 3.6, life: [0.2, 0.42] };
+  var CFG = {
+    rocketG: 520.0,
+    flashSize: [26, 40],
+    riseEmberSec: 0.07, riseEmberSize: 2.2, riseEmberLife: [0.3, 0.7],
+    puff: { seconds: 0.18, interval: 0.012, size: 3.6, life: [0.2, 0.42] }
+  };
 
   function Firework(show, style, palette, launch, burst, rng, o) {
     o = o || {};
@@ -957,8 +992,8 @@ setTimeout(function () {
     this.x0 = launch[0]; this.y0 = launch[1];
     this.x1 = burst[0]; this.y1 = burst[1];
     this.x = this.x0; this.y = this.y0;
-    this.vy = Math.sqrt(Math.max(1.0, 2 * ROCKET_G * (this.y1 - this.y0)));
-    this.vx = (this.x1 - this.x0) / Math.max(1e-3, this.vy / ROCKET_G);
+    this.vy = Math.sqrt(Math.max(1.0, 2 * CFG.rocketG * (this.y1 - this.y0)));
+    this.vx = (this.x1 - this.x0) / Math.max(1e-3, this.vy / CFG.rocketG);
     this.phase = 'rise';
     this.children = [];
     // 发射尾迹：头端白热、尾端是凉掉的红
@@ -985,7 +1020,7 @@ setTimeout(function () {
   /**
    * 上升段：推进弹体、喂尾迹、撒几颗余烬；炸开之后只负责爆心那一小簇碎屑。
    *
-   * 爆心碎屑（`BURST_PUFF`）：炸开那一下在爆点密撒一小簇，**只撒 0.18s**，每颗也只活
+   * 爆心碎屑（`CFG.puff`）：炸开那一下在爆点密撒一小簇，**只撒 0.18s**，每颗也只活
    * 0.15~0.35s，所以"炸开有粒子、炸完立刻干净"。教训写在下面这条 git 记录里：早先这个
    * 分支是每 0.09s 一颗、一直撒到发射尾迹淡完（3.4s），实测全部余烬的 56% 来自它，
    * 中心飘着一层不散的碎屑 —— 观感就是"烟花都爆完了粒子还在"。
@@ -995,27 +1030,28 @@ setTimeout(function () {
   Firework.prototype.update = function (dt) {
     if (this.phase !== 'rise') {
       this.burstAge += dt;
-      if (this.burstAge >= BURST_PUFF.seconds) return;   // 窗口过了：爆心不再补粒子
+      if (this.burstAge >= CFG.puff.seconds) return;    // 窗口过了：爆心不再补粒子
       this.emberAcc += dt;
-      while (this.emberAcc > BURST_PUFF.interval) {
-        this.emberAcc -= BURST_PUFF.interval;
+      while (this.emberAcc > CFG.puff.interval) {
+        this.emberAcc -= CFG.puff.interval;
         this.show.add(new el.Ember(this.show, this.x, this.y,
                                    this.rng.uniform(-70, 70), this.rng.uniform(-40, 80),
-                                   this.palette.core, BURST_PUFF.size,
-                                   this.rng.uniform(BURST_PUFF.life[0], BURST_PUFF.life[1])));
+                                   this.palette.core, CFG.puff.size,
+                                   this.rng.uniform(CFG.puff.life[0], CFG.puff.life[1])));
       }
       return;
     }
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-    this.vy -= ROCKET_G * dt;
+    this.vy -= CFG.rocketG * dt;
     this.trail.push(this.x, this.y);                    // 把真实路径喂给尾迹
     this.emberAcc += dt;
-    if (this.emberAcc > 0.07) {                         // 上升时撒一点火星
+    if (this.emberAcc > CFG.riseEmberSec) {             // 上升时撒一点火星
       this.emberAcc = 0.0;
       this.show.add(new el.Ember(this.show, this.x, this.y - 6,
                                  this.rng.uniform(-10, 10), -this.rng.uniform(20, 60),
-                                 this.palette.stem, 2.2, this.rng.uniform(0.3, 0.7)));
+                                 this.palette.stem, CFG.riseEmberSize,
+                                 this.rng.uniform(CFG.riseEmberLife[0], CFG.riseEmberLife[1])));
     }
     if (this.vy <= 0.0) {
       this.y = this.y1;
@@ -1039,7 +1075,8 @@ setTimeout(function () {
     else { rmin = spec.radius[0]; rmax = spec.radius[1]; }
     var drag = spec.drag;
     var cx = this.x, cy = this.y;
-    this.show.add(new el.Flash(this.show, cx, cy, pal, rng.uniform(26, 40)));
+    this.show.add(new el.Flash(this.show, cx, cy, pal,
+                               rng.uniform(CFG.flashSize[0], CFG.flashSize[1])));
     // 同上：音效等 UI 层挂钩，只读不写，不影响这一场
     if (this.show.onEvent) {
       this.show.onEvent({ type: 'burst', style: this.style, x: cx, y: cy,
@@ -1094,7 +1131,7 @@ setTimeout(function () {
     return true;
   };
 
-  FW.firework = { Firework: Firework, ROCKET_G: ROCKET_G };
+  FW.firework = { Firework: Firework, CFG: CFG, ROCKET_G: CFG.rocketG };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/show.js ===================== */
@@ -1139,12 +1176,31 @@ setTimeout(function () {
     this.motionScale = 1.0;                 // 每发规模的额外缩放（"减少动效"时压低）
     this.time = 0.0;
     this.nextSpawn = 0.0;
-    this.nextFinale = rng.uniform(14.0, 22.0);
+    this.nextFinale = rng.uniform(ORCH.firstFinaleMin, ORCH.firstFinaleMax);
   }
 
   /* -------------------------------------------------------------- 元素 */
 
   Show.prototype.add = function (e) { this.elements.push(e); };
+
+  /**
+   * 演出节奏与构图（**整体可调**，见调参面板 src/tune.js）：
+   *   *Min/*Max 是秒数区间，会再除以拥挤度；crowd 是"画面拥挤度 -> 放量倍率"的阶梯
+   *   （从最满到最空，第一档命中即返回）。这里全部是**读的时候取一次**，
+   *   所以面板改动立刻对之后的发射生效，默认值就是原来写死的那些。
+   */
+  var ORCH = {
+    spawnMin: 0.9, spawnMax: 2.3,               // 常规发射间隔
+    finaleMin: 18.0, finaleMax: 30.0,           // 齐射间隔
+    firstFinaleMin: 14.0, firstFinaleMax: 22.0, // 开播后第一波齐射
+    salvoMin: 2, salvoMax: 4,                   // 一波齐射几发
+    densityCap: 2.0,                            // 每发规模上限（别让单发变成一颗巨型球）
+    elementRatio: 0.6,                          // 元素表上限 = 预算 × 这个
+    xSpread: 0.42, drift: 0.20, xLimit: 0.46,   // 发射点水平散布 / 横飘 / 硬边界
+    yMin: 0.06, yMax: 0.46,                     // 爆心高度区间
+    crowd: [[1.15, 0.25], [0.95, 0.40], [0.72, 0.65], [0.48, 1.0],
+            [0.28, 1.5], [0.12, 2.2], [0, 3.0]]
+  };
 
   /**
    * 拥挤度 -> 放量倍率。上一帧的实际图元数 / 预算 就是拥挤度：
@@ -1153,19 +1209,14 @@ setTimeout(function () {
    */
   Show.prototype.crowd = function () {
     if (this.maxGeos <= 0) return 1.0;
-    var load = this.lastGeos / this.maxGeos;
-    if (load >= 1.15) return 0.25;      // 超了：明显收敛
-    if (load >= 0.95) return 0.40;
-    if (load >= 0.72) return 0.65;
-    if (load >= 0.48) return 1.0;       // 差不多：按原样
-    if (load >= 0.28) return 1.5;       // 还空：多发、每发大一点
-    if (load >= 0.12) return 2.2;
-    return 3.0;                         // 空得很：铺满
+    var load = this.lastGeos / this.maxGeos, c = ORCH.crowd;
+    for (var i = 0; i < c.length; i++) if (load >= c[i][0]) return c[i][1];
+    return 1.0;
   };
 
-  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。motionScale 是"减少动效"的降幅。 */
+  /** 每发的规模倍率（封顶见 ORCH.densityCap）。motionScale 是"减少动效"的降幅。 */
   Show.prototype.density = function () {
-    return Math.min(2, this.crowd()) * this.motionScale;
+    return Math.min(ORCH.densityCap, this.crowd()) * this.motionScale;
   };
 
   /** 发射节奏倍率：间隔除以它。 */
@@ -1178,7 +1229,7 @@ setTimeout(function () {
 
   /** 元素表的安全上限：按预算缩放（原来写死 260，预算调大后会把画面卡住）。 */
   Show.prototype.elementCap = function () {
-    return (this.maxGeos > 0) ? Math.round(this.maxGeos * 0.6) : 2000;
+    return (this.maxGeos > 0) ? Math.round(this.maxGeos * ORCH.elementRatio) : 2000;
   };
 
   Show.prototype.spawn = function (style, launch, burst, palette, o) {
@@ -1202,10 +1253,10 @@ setTimeout(function () {
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;
-    var x0 = rng.uniform(-0.42, 0.42) * this.w;
-    var x1 = Math.max(-0.46 * this.w,
-                      Math.min(0.46 * this.w, x0 + rng.uniform(-0.20, 0.20) * this.w));
-    var y1 = rng.uniform(0.06, 0.46) * this.h;          // 中上部炸开
+    var x0 = rng.uniform(-ORCH.xSpread, ORCH.xSpread) * this.w;
+    var x1 = Math.max(-ORCH.xLimit * this.w,
+                      Math.min(ORCH.xLimit * this.w, x0 + rng.uniform(-ORCH.drift, ORCH.drift) * this.w));
+    var y1 = rng.uniform(ORCH.yMin, ORCH.yMax) * this.h;   // 中上部炸开
     return [[x0, -this.h / 2 - 6], [x1, y1]];
   };
 
@@ -1269,11 +1320,11 @@ setTimeout(function () {
     //    auto = false 时完全不自动排（系统开了"减少动效"）：只有你按 R / 点画面才放。
     if (!this.auto) return;
     if (this.time >= this.nextFinale) {
-      this.nextFinale = this.time + this.rng.uniform(18.0, 30.0) / this.pace();
-      this.spawnRandom(Math.round(this.rng.randint(2, 4) * this.density()));
+      this.nextFinale = this.time + this.rng.uniform(ORCH.finaleMin, ORCH.finaleMax) / this.pace();
+      this.spawnRandom(Math.round(this.rng.randint(ORCH.salvoMin, ORCH.salvoMax) * this.density()));
       this.nextSpawn = this.time + 2.0;
     } else if (this.time >= this.nextSpawn) {
-      this.nextSpawn = this.time + this.rng.uniform(0.9, 2.3) / this.pace();
+      this.nextSpawn = this.time + this.rng.uniform(ORCH.spawnMin, ORCH.spawnMax) / this.pace();
       this.spawnRandom(1);
     }
   };
@@ -1283,7 +1334,7 @@ setTimeout(function () {
     show.spawnRandom(2);
   }
 
-  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS };
+  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS, ORCH: ORCH };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/view.js ===================== */
@@ -1309,6 +1360,12 @@ setTimeout(function () {
   var toHex = core.toHex, RAD2DEG = core.RAD2DEG;
 
   /**
+   * 背景色（调参面板可改，见 src/tune.js）：默认就是原版那个深蓝 core.BG。
+   * 这里放成一个对象是为了让面板拿到**引用**原地改，而不是各模块各存一份。
+   */
+  var BG = { hex: toHex(core.BG) };
+
+  /**
    * @param {HTMLCanvasElement} canvas
    * 逻辑尺寸由 Show 决定（每个场景一个），屏幕尺寸由窗口决定；
    * 两边不一致时按等比缩放居中（original 场景固定 924×691，所以窗口再大也
@@ -1318,7 +1375,7 @@ setTimeout(function () {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.maxDpr = maxDpr === undefined ? 2 : maxDpr;
-    this.bg = toHex(core.BG);
+    this.bg = BG.hex;
     this.geos = 0;
     this.segs = 0;          // 本帧实际描边的线段数（增强模式会远超图元数）
     this.layout(1, 1);
@@ -1404,7 +1461,10 @@ setTimeout(function () {
   /** 导出 PNG 用的 dataURL（浏览器 Canvas 自带，不用手写 zlib/PNG）。 */
   Renderer.prototype.toDataURL = function () { return this.canvas.toDataURL('image/png'); };
 
-  FW.view = { Renderer: Renderer };
+  /** 换背景色（调参面板用）：下一次重绘就生效，不用重建渲染器。 */
+  Renderer.prototype.setBg = function (hex) { this.bg = hex; return this.bg; };
+
+  FW.view = { Renderer: Renderer, BG: BG };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/app.js ===================== */
@@ -1531,7 +1591,7 @@ setTimeout(function () {
   App.prototype.setReduceMotion = function (on) {
     this.reduceMotion = !!on;
     this.show.auto = !this.reduceMotion;
-    this.show.motionScale = this.reduceMotion ? 0.55 : 1.0;
+    this.show.motionScale = this.reduceMotion ? FW.tune.MOTION.reduced : 1.0;
     return this.reduceMotion;
   };
 
@@ -2244,23 +2304,31 @@ setTimeout(function () {
   }
 
   /**
-   * 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。
-   * 注意是**只压不丢**：超预算的那一声仍然响，只是音量压到 SQUEEZED。
-   * 早先的版本直接丢音，实测 max=1500 时 30 秒丢掉 10/60 个事件 —— 听起来就是
-   * "怎么有时候跳过一些"。
+   * 音效的可调参数（**整体可调**，见调参面板 src/tune.js），默认值就是原来写死的那些：
+   *   BUDGET 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。
+   *          注意是**只压不丢**：超预算的那一声仍然响，只是音量压到 squeezed。
+   *          早先的版本直接丢音，实测 max=1500 时 30 秒丢掉 10/60 个事件 ——
+   *          听起来就是"怎么有时候跳过一些"。
+   *   LEVEL  整体电平（分层增益保持相对比例）
+   *   CRISP  爆炸音的"脆/闷"：base 是与参考录音对齐的那一档，spread 是每发的
+   *          随机幅度，壳大（radius 大）偏闷 —— shellRef/shellSpan 就是这个斜率
+   *   TONE   主链低通（真实录音顶上是滚降的）
    */
-  var TOKENS_MAX = 8, TOKENS_PER_SEC = 8, SQUEEZED = 0.45;
+  var BUDGET = { max: 8, perSec: 8, squeezed: 0.45 };
+  var LEVEL = { init: 0.6 };
+  var CRISP = { base: 0.58, spread: 0.44, shellRef: 200, shellSpan: 450 };
+  var TONE = { hz: 15000 };
 
   function Engine(o) {
     o = o || {};
-    this.level = (o.level === undefined) ? 0.6 : o.level;   // 整体电平（分层增益保持相对比例）
+    this.level = (o.level === undefined) ? LEVEL.init : o.level;
     this.enabled = o.enabled !== false;
     this.ctx = o.context || null;        // 注入上下文 = 离线渲染（tools/sound_shot.js 用）
     this.comp = null;
     this.master = null;
     this.mix = null;                 // 录制用的音频输出（MediaStreamDestination）
     this.buf = null;                 // 复用的白噪声
-    this.tokens = TOKENS_MAX;
+    this.tokens = BUDGET.max;
     this.refillAt = 0;
     this.launches = 0;
     this.bursts = 0;
@@ -2291,7 +2359,7 @@ setTimeout(function () {
     // 低通 17kHz：真实录音的顶上是滚降的，白噪声一路到 24k 听着会"太嘶"
     this.tone = ctx.createBiquadFilter();
     this.tone.type = 'lowpass';
-    this.tone.frequency.value = 15000;
+    this.tone.frequency.value = TONE.hz;
     this.tone.Q.value = 0.4;
     this.comp.connect(this.tone);
     this.tone.connect(this.master);
@@ -2307,6 +2375,20 @@ setTimeout(function () {
   Engine.prototype.resume = function () {
     var ctx = this.ctx;
     if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume();
+  };
+
+  /** 整体电平（调参面板用）：立刻作用到主增益上，开关状态不变。 */
+  Engine.prototype.setLevel = function (v) {
+    this.level = v;
+    if (this.master) this.master.gain.value = this.enabled ? v : 0;
+    return this.level;
+  };
+
+  /** 主链低通频率（调参面板用）：上下文还没建就只记下数值。 */
+  Engine.prototype.setTone = function (hz) {
+    TONE.hz = hz;
+    if (this.tone) this.tone.frequency.value = hz;
+    return hz;
   };
 
   Engine.prototype.setEnabled = function (on) {
@@ -2334,13 +2416,13 @@ setTimeout(function () {
   Engine.prototype.gainFactor = function () {
     var now = this.ctx ? this.ctx.currentTime : 0;
     if (now > this.refillAt) {                       // 按过去的时间补名额（不是每查一次补一个）
-      var add = Math.floor((now - this.refillAt) * TOKENS_PER_SEC) + 1;
-      this.tokens = Math.min(TOKENS_MAX, this.tokens + add);
-      this.refillAt = now + 1 / TOKENS_PER_SEC;
+      var add = Math.floor((now - this.refillAt) * BUDGET.perSec) + 1;
+      this.tokens = Math.min(BUDGET.max, this.tokens + add);
+      this.refillAt = now + 1 / BUDGET.perSec;
     }
     if (this.tokens > 0) { this.tokens--; return 1; }
     this.squeezed++;
-    return SQUEEZED;
+    return BUDGET.squeezed;
   };
 
 
@@ -2413,10 +2495,13 @@ setTimeout(function () {
     var t = ctx.currentTime + 0.01;
     var k = this.gainFactor();                           // 齐射时压小，但不丢
     // 脆/闷：壳大偏闷，另外每发都有点不同（真实爆炸声本来就不一样）
-    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp : 0.58 + (Math.random() - 0.5) * 0.44;
-    if (ev && ev.radius) crisp += (200 - ev.radius) / 450;      // 半径大 → 更闷
+    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp
+              : CRISP.base + (Math.random() - 0.5) * CRISP.spread;
+    if (ev && ev.radius) {      // 半径大 → 更闷
+      crisp += (CRISP.shellRef - ev.radius) / CRISP.shellSpan;
+    }
     crisp = Math.max(0.05, Math.min(0.98, crisp));
-    var c = crisp - 0.58;          // 下面每层都写成「0.58 时调好的值 + c×跨度」：
+    var c = crisp - CRISP.base;    // 下面每层都写成「基准档调好的值 + c×跨度」：
                                    // 默认那档仍与参考录音对齐，两端则明显更脆/更闷
 
     // 1) 脉冲 + 脆响：1ms 起音的高通噪声（频谱上是那根竖线），脆则更亮更响
@@ -2461,7 +2546,8 @@ setTimeout(function () {
     else if (ev.type === 'burst') this.burst(ev);
   };
 
-  FW.sound = { Engine: Engine, supported: supported };
+  FW.sound = { Engine: Engine, supported: supported,
+               BUDGET: BUDGET, LEVEL: LEVEL, CRISP: CRISP, TONE: TONE };
 })(globalThis.FW || (globalThis.FW = {}));
 
 /* ===================== src/sound_kit.js ===================== */
@@ -2736,6 +2822,528 @@ setTimeout(function () {
   };
 })(globalThis.FW || (globalThis.FW = {}));
 
+/* ===================== src/tune.js ===================== */
+/* ============================================================================
+ * tune.js —— 调参面板的"参数表"：登记可改项 / 读写 / 持久化 / 导出
+ * ---------------------------------------------------------------------------
+ * 两条硬约束：
+ *   1) **默认值不在这里**。每个参数的真身仍是各模块里那个对象（show.js 的 ORCH、
+ *      elements.js 的 PHYS、firework.js 的 CFG、sound.js 的 BUDGET/CRISP/TONE/LEVEL、
+ *      data.js 的 STYLES/DENSE、view.js 的 BG）—— 这里只拿**引用**登记，原地写回。
+ *      所以不开面板时行为与之前逐位一致（npm run baseline 守着：默认参数不许变）。
+ *   2) **只有 ?tune=1 才读存储**。否则任何人打开页面都是默认档，不会因为某台机器上
+ *      存着一份调参结果而变样；分享链接里也不带调参（shareUrl 只管 seed/max）。
+ * 面板本体（DOM / 事件 / 样式）在 src/tune_ui.js。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  var KEY = 'tune';                    // localStorage: fw.tune，只存"改过的那几项"
+  var MOTION = { reduced: 0.55 };      // 系统"减少动效"时每发的降幅（app.js 读它）
+
+  var STYLE_CN = { spoke: '辐条', cloud: '云团', ring: '环形', willow: '垂柳', palm: '棕榈' };
+  /** 花型的键 -> [中文名, 最小值, 最大值, 步长, 常用(★)]。花型没有的键会自动跳过。 */
+  var STYLE_KEYS = {
+    count: ['火花数', 1, 60, 1, true],
+    radius: ['扩散半径', 10, 400, 5, true],
+    dot: ['火花大小', 2, 20, 0.5, true],
+    drag: ['阻尼（弹开快慢）', 0.2, 8, 0.1, true],
+    life: ['寿命', 0.2, 6, 0.05, true],
+    gravity: ['下坠力度', 0, 300, 5, true],
+    jitter: ['角度抖动', 0, 1, 0.01, true],
+    trail: ['拖尾时长', 0, 5, 0.05, true],
+    trail_seg: ['拖尾最多几段', 1, 8, 1, false],
+    ember: ['每秒掉几颗余烬', 0, 5, 0.1, false],
+    float_up: ['整体上飘', 0, 80, 2, false],
+    spread: ['半径收窄', 0, 0.6, 0.02, false]
+  };
+  var CURVE = ['预算 ≥115%（最挤）', '≥95%', '≥72%', '≥48%', '≥28%', '≥12%', '最空（<12%）'];
+
+  var controls = [], index = {}, defaults = {};
+
+  /** 登记一棵"根"：面板只认这几棵树，别的一律碰不到（比如 SECRET 就不在里面）。 */
+  function add(root, path, label, group, min, max, step, star, live) {
+    var parts = path.split('.'), holder = root.obj, i;
+    for (i = 0; i < parts.length - 1; i++) holder = holder[parts[i]];
+    var key = parts[parts.length - 1];
+    var c = {
+      // live 是标在"根"上的（背景色 / 电平 / 低通 / 减少动效降幅这几棵）：它们都是"建
+      // 的时候取一次"，所以改完要顺手作用到正在跑的对象上，不能等下一位访客。
+      id: root.name + '.' + path, label: label, group: group, live: live || root.live || null,
+      min: min, max: max, step: step, star: !!star, kind: 'number',
+      get: function () { return holder[key]; },
+      set: function (v) { holder[key] = v; return holder[key]; },
+      isDefault: function () { return holder[key] === defaults[this.id]; }
+    };
+    controls.push(c);
+    index[c.id] = c;
+    return c;
+  }
+
+  function root(name, obj, live) { return { name: name, obj: obj, live: live || null }; }
+
+  /* ------------------------------------------------ 登记：花型 / 编排 / 元素 */
+
+  var R_STYLES = root('styles', FW.data.STYLES);
+  Object.keys(FW.data.STYLES).forEach(function (name) {
+    var spec = FW.data.STYLES[name], group = '花型 · ' + (STYLE_CN[name] || name);
+    Object.keys(STYLE_KEYS).forEach(function (k) {
+      var v = spec[k], m = STYLE_KEYS[k];
+      if (v === undefined) return;                       // 这个花型没这一项
+      if (Array.isArray(v)) {                            // 区间：上下限各一行
+        add(R_STYLES, name + '.' + k + '.0', m[0] + ' 下限', group, m[1], m[2], m[3], m[4]);
+        add(R_STYLES, name + '.' + k + '.1', m[0] + ' 上限', group, m[1], m[2], m[3], m[4]);
+      } else {
+        add(R_STYLES, name + '.' + k, m[0], group, m[1], m[2], m[3], m[4]);
+      }
+    });
+  });
+
+  var R_DENSE = root('dense', FW.data.DENSE);
+  add(R_DENSE, 'spark', '火花轨迹采样上限（段）', '画面', 2, 40, 1, true);
+  add(R_DENSE, 'trail', '发射尾迹采样上限（段）', '画面', 2, 120, 1, true);
+
+  var R_ORCH = root('orch', FW.show.ORCH);
+  add(R_ORCH, 'spawnMin', '常规发射间隔 下限', '编排', 0.1, 8, 0.05, true);
+  add(R_ORCH, 'spawnMax', '常规发射间隔 上限', '编排', 0.1, 8, 0.05, true);
+  add(R_ORCH, 'finaleMin', '齐射间隔 下限', '编排', 4, 90, 0.5, true);
+  add(R_ORCH, 'finaleMax', '齐射间隔 上限', '编排', 4, 90, 0.5, true);
+  add(R_ORCH, 'salvoMin', '一波齐射 最少几发', '编排', 1, 8, 1, false);
+  add(R_ORCH, 'salvoMax', '一波齐射 最多几发', '编排', 1, 8, 1, true);
+  add(R_ORCH, 'densityCap', '每发规模上限', '编排', 1, 4, 0.05, true);
+  add(R_ORCH, 'elementRatio', '元素表上限 = 预算 ×', '编排', 0.1, 1.5, 0.05, false);
+  add(R_ORCH, 'xSpread', '发射点水平散布', '编排', 0, 0.9, 0.01, true);
+  add(R_ORCH, 'drift', '爆心横向漂移', '编排', 0, 0.9, 0.01, false);
+  add(R_ORCH, 'xLimit', '爆心横向硬边界', '编排', 0, 1, 0.01, false);
+  add(R_ORCH, 'yMin', '爆心高度 下限', '编排', 0, 0.9, 0.01, true);
+  add(R_ORCH, 'yMax', '爆心高度 上限', '编排', 0, 0.9, 0.01, true);
+  add(R_ORCH, 'firstFinaleMin', '开播后第一波齐射 最早', '编排', 2, 60, 0.5, false);
+  add(R_ORCH, 'firstFinaleMax', '开播后第一波齐射 最晚', '编排', 2, 60, 0.5, false);
+  FW.show.ORCH.crowd.forEach(function (band, i) {
+    add(R_ORCH, 'crowd.' + i + '.1', CURVE[i] + ' → 倍率', '拥挤度曲线', 0, 5, 0.05, false);
+  });
+
+  var R_PHYS = root('phys', FW.elements.PHYS);
+  add(R_PHYS, 'flashLife', '爆心闪光 寿命', '爆心', 0.02, 1, 0.01, true);
+  add(R_PHYS, 'flashFade', '爆心闪光 变暗指数', '爆心', 0.3, 4, 0.1, false);
+  add(R_PHYS, 'flashShrink.0', '爆心闪光 收缩基准', '爆心', 0, 1, 0.05, false);
+  add(R_PHYS, 'flashShrink.1', '爆心闪光 收缩比例', '爆心', 0, 1, 0.05, false);
+  add(R_PHYS, 'emberGravity', '余烬 下坠', '余烬', 0, 400, 5, true);
+  add(R_PHYS, 'emberDrag', '余烬 横向阻尼', '余烬', 0, 4, 0.1, true);
+  add(R_PHYS, 'emberTwinkleAt', '余烬 闪烁门槛', '余烬', 0, 1, 0.05, false);
+  add(R_PHYS, 'emberTwinkleHz', '余烬 闪烁频率', '余烬', 0, 60, 0.5, false);
+  add(R_PHYS, 'emberSize.0', '余烬 半径基准', '余烬', 0, 1, 0.05, false);
+  add(R_PHYS, 'emberSize.1', '余烬 半径随亮度', '余烬', 0, 1, 0.05, false);
+  add(R_PHYS, 'emberLife.0', '火花掉的余烬 寿命 下限', '余烬', 0.05, 4, 0.05, false);
+  add(R_PHYS, 'emberLife.1', '火花掉的余烬 寿命 上限', '余烬', 0.05, 4, 0.05, false);
+  add(R_PHYS, 'emberSizeK', '火花掉的余烬 大小（× 火花半径）', '余烬', 0, 1, 0.01, false);
+  add(R_PHYS, 'sparkTrailStep', '轨迹采样步长（像素）', '火花', 1, 40, 0.5, true);
+  add(R_PHYS, 'sparkShade', '火花变暗指数', '火花', 0.2, 3, 0.05, false);
+  add(R_PHYS, 'sparkTwinkleBelow', '末期闪烁 亮度门槛', '火花', 0, 1, 0.02, false);
+  add(R_PHYS, 'sparkTwinkleChance', '末期闪烁 概率', '火花', 0, 1, 0.05, false);
+  add(R_PHYS, 'sparkTrailWidth', '尾迹半宽（× 火花半径）', '火花', 0, 1, 0.02, true);
+  add(R_PHYS, 'trailFade', '发射尾迹 散掉要多久', '发射尾迹', 0.1, 8, 0.1, true);
+  add(R_PHYS, 'trailStep', '发射尾迹 采样步长', '发射尾迹', 1, 40, 0.5, true);
+  add(R_PHYS, 'trailMaxPts', '发射尾迹 最多几个点', '发射尾迹', 8, 300, 2, false);
+
+  var R_CFG = root('cfg', FW.firework.CFG);
+  add(R_CFG, 'rocketG', '火箭重力（决定上升时间）', '发射', 50, 2000, 10, true);
+  add(R_CFG, 'flashSize.0', '爆心闪光 半径 下限', '爆心', 4, 120, 1, true);
+  add(R_CFG, 'flashSize.1', '爆心闪光 半径 上限', '爆心', 4, 120, 1, true);
+  add(R_CFG, 'riseEmberSec', '上升撒火星 间隔', '发射', 0.01, 0.5, 0.01, false);
+  add(R_CFG, 'riseEmberSize', '上升撒火星 大小', '发射', 0.5, 8, 0.1, false);
+  add(R_CFG, 'riseEmberLife.0', '上升撒火星 寿命 下限', '发射', 0.05, 3, 0.05, false);
+  add(R_CFG, 'riseEmberLife.1', '上升撒火星 寿命 上限', '发射', 0.05, 3, 0.05, false);
+  add(R_CFG, 'puff.seconds', '爆心碎屑 撒多久', '爆心', 0, 1.5, 0.01, true);
+  add(R_CFG, 'puff.interval', '爆心碎屑 间隔', '爆心', 0.002, 0.2, 0.002, true);
+  add(R_CFG, 'puff.size', '爆心碎屑 大小', '爆心', 0.5, 12, 0.1, true);
+  add(R_CFG, 'puff.life.0', '爆心碎屑 寿命 下限', '爆心', 0.05, 2, 0.01, false);
+  add(R_CFG, 'puff.life.1', '爆心碎屑 寿命 上限', '爆心', 0.05, 2, 0.01, true);
+
+  /* --------------------------------------------------------- 登记：音效 / 外观 */
+
+  var R_BUDGET = root('budget', FW.sound.BUDGET);
+  add(R_BUDGET, 'perSec', '发声预算（个/秒）', '音效', 1, 30, 1, true);
+  add(R_BUDGET, 'max', '同时发声上限', '音效', 1, 30, 1, false);
+  add(R_BUDGET, 'squeezed', '超预算时压到', '音效', 0.05, 1, 0.05, false);
+  var R_CRISP = root('crisp', FW.sound.CRISP);
+  add(R_CRISP, 'base', '爆炸 脆闷基准（0 闷 ~ 1 脆）', '音效', 0.05, 0.95, 0.01, true);
+  add(R_CRISP, 'spread', '爆炸 每发的随机幅度', '音效', 0, 1, 0.02, true);
+  add(R_CRISP, 'shellRef', '壳径基准（越大越闷）', '音效', 20, 500, 10, false);
+  add(R_CRISP, 'shellSpan', '壳径影响跨度', '音效', 50, 2000, 10, false);
+  add(root('level', FW.sound.LEVEL, 'level'), 'init', '整体电平', '音效', 0, 1, 0.02, true);
+  add(root('tone', FW.sound.TONE, 'tone'), 'hz', '主链低通（Hz）', '音效', 2000, 20000, 100, true);
+  add(root('bg', FW.view.BG, 'bg'), 'hex', '背景色', '画面', 0, 0, 0, true).kind = 'color';
+  add(root('motion', MOTION, 'motion'), 'reduced', '减少动效时的降幅', '画面', 0.1, 1, 0.01, true);
+
+  Object.keys(index).forEach(function (id) { defaults[id] = index[id].get(); });
+
+  /* ------------------------------------------------------------------ 读写 */
+
+  function get(id) { return index[id] ? index[id].get() : undefined; }
+  function set(id, v) { return index[id] ? index[id].set(v) : undefined; }
+
+  /** 改过的项（只存/只导出这些，以后源码默认值改了也不会被旧记录盖住）。 */
+  function diff() {
+    var out = {};
+    controls.forEach(function (c) { if (!c.isDefault()) out[c.id] = c.get(); });
+    return out;
+  }
+
+  function changed() { return Object.keys(diff()).length; }
+
+  function wanted() {
+    var q = (typeof location === 'undefined') ? '' : (location.search || '');
+    return /[?&]tune=1(&|$)/.test(q);
+  }
+
+  /** 把某一行"活"地作用到正在跑的对象上（背景色、电平这些不是读一次就完的事）。 */
+  function applyLive(id) {
+    var c = index[id], app2 = FW.app && FW.app.instance;
+    if (!c || !app2) return;
+    if (c.live === 'bg') app2.renderer.setBg(c.get());
+    else if (c.live === 'motion') app2.setReduceMotion(app2.reduceMotion);
+    else if (c.live === 'level' && app2.sound) app2.sound.setLevel(c.get());
+    else if (c.live === 'tone' && app2.sound) app2.sound.setTone(c.get());
+  }
+
+  function applyLiveAll() { controls.forEach(function (c) { applyLive(c.id); }); }
+
+  /** 从存储读回改过的项（只在 ?tune=1 时调用）。认不出来的键一律忽略。 */
+  function load(store) {
+    var raw = store && store.get(KEY), data, n = 0;
+    if (!raw) return 0;
+    try { data = JSON.parse(raw); } catch (e) { return 0; }
+    controls.forEach(function (c) {
+      var v = data[c.id];
+      if (c.kind === 'color' ? (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v))
+                             : (typeof v === 'number' && isFinite(v))) {
+        c.set(v); n++;
+      }
+    });
+    applyLiveAll();
+    return n;
+  }
+
+  /** 写回存储：没有改动就把键删掉，别留一个空壳。 */
+  function save(store) {
+    if (!store) return 0;
+    var d = diff(), n = Object.keys(d).length;
+    if (n) store.set(KEY, JSON.stringify(d));
+    else if (store.remove) store.remove(KEY);
+    return n;
+  }
+
+  /** 复位：全部回到源码默认值，并把存储里的那份删掉。 */
+  function reset(store) {
+    controls.forEach(function (c) { c.set(defaults[c.id]); });
+    if (store) { if (store.remove) store.remove(KEY); else store.set(KEY, ''); }
+    applyLiveAll();
+    return 0;
+  }
+
+  /** 导出：只有改过的那几项（贴回源码 = 把值写回对应模块的默认值）。 */
+  function diffJson() { return JSON.stringify(diff(), null, 2); }
+
+  /** 全部参数的当前值（"全部参数"那个框用）。 */
+  function allJson() {
+    var out = {};
+    controls.forEach(function (c) { out[c.id] = c.get(); });
+    return JSON.stringify(out, null, 1);
+  }
+
+  /**
+   * 把"全部参数"框里的 JSON 应用回去：只认登记过的键，数值/颜色合法才写。
+   * 返回 { applied, ignored } 好让面板说清楚发生了什么。
+   */
+  function applyJson(text) {
+    var data, applied = 0, ignored = 0;
+    try { data = JSON.parse(text); } catch (e) { return { applied: 0, ignored: -1 }; }
+    if (!data || typeof data !== 'object') return { applied: 0, ignored: -1 };
+    Object.keys(data).forEach(function (id) {
+      var c = index[id];
+      if (!c) { ignored++; return; }
+      var v = data[id];
+      if (c.kind === 'color' ? (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v))
+                             : (typeof v === 'number' && isFinite(v))) {
+        c.set(v); applyLive(id); applied++;
+      } else ignored++;
+    });
+    return { applied: applied, ignored: ignored };
+  }
+
+  FW.tune = {
+    KEY: KEY, MOTION: MOTION,
+    controls: function () { return controls; },
+    group: function (name) { return controls.filter(function (c) { return c.group === name; }); },
+    groups: function () {
+      var seen = [];
+      controls.forEach(function (c) { if (seen.indexOf(c.group) < 0) seen.push(c.group); });
+      return seen;
+    },
+    styleNames: STYLE_CN,
+    get: get, set: set, applyLive: applyLive, applyLiveAll: applyLiveAll,
+    changed: changed, diff: diff, diffJson: diffJson, allJson: allJson, applyJson: applyJson,
+    wanted: wanted, load: load, save: save, reset: reset
+  };
+})(globalThis.FW || (globalThis.FW = {}));
+
+/* ===================== src/tune_ui.js ===================== */
+/* ============================================================================
+ * tune_ui.js —— 调参面板的 DOM（参数表在 src/tune.js）
+ * ---------------------------------------------------------------------------
+ * 只在 `?tune=1` 时由 ui.js 挂上来；平时这个文件不建任何节点，连 <style> 都不注入。
+ * 面板放在**右下**（HUD 在右上、控制台在左），互不遮挡。
+ *
+ * 面板只做三件事：拖动 -> 原地改默认值（tune.set）、送一次"活"更新（tune.applyLive）、
+ * 松手时把"改过的那几项"落盘（tune.save -> localStorage 的 fw.tune）。
+ * 「复制改动 JSON」给的是 `{"styles.spoke.life": 1.8, ...}` 这种**只有改动**的清单：
+ * 贴回源码 = 把值写回对应模块的默认值，然后把 fw.tune 复位即可，旧记录不会盖住新默认。
+ * ==========================================================================*/
+;(function (FW) {
+  'use strict';
+
+  var CSS = [
+    '#tune{position:fixed;right:12px;bottom:12px;z-index:5;width:330px;max-height:min(72vh,760px);',
+    'overflow:auto;padding:12px;border-radius:14px;background:rgba(8,12,32,.88);',
+    'backdrop-filter:blur(10px);border:1px solid rgba(255,211,77,.3);',
+    'box-shadow:0 14px 34px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:7px;',
+    'font-size:12px;color:#d7e5ff}',
+    '#tune .head{display:flex;align-items:center;gap:8px}',
+    '#tune .head b{font-size:13px;color:#f2f6ff}',
+    '#tune .head button{margin-left:auto}',
+    '#tune h2{margin:6px 0 1px;font-size:11.5px;font-weight:600;letter-spacing:.3px;color:#ffd98a}',
+    '#tune .row{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(200,215,255,.78)}',
+    '#tune .row .k{flex:0 0 124px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '#tune .row input[type=range]{flex:1 1 auto;min-width:0;accent-color:#ffd34d}',
+    '#tune .row input[type=color]{flex:0 0 44px;height:24px;padding:0}',
+    '#tune .row output{flex:0 0 42px;text-align:right;font-weight:600;color:#ffd98a;',
+    'font-variant-numeric:tabular-nums}',
+    '#tune select{width:100%}',
+    '#tune .note{margin:0;font-size:10.5px;line-height:1.6;color:rgba(178,198,255,.62)}',
+    '#tune .acts{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}',
+    '#tune textarea{width:100%;height:140px;padding:6px;border-radius:9px;resize:vertical;',
+    'font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#e8f0ff;outline:none;',
+    'background:rgba(255,255,255,.05);border:1px solid rgba(140,170,255,.22)}',
+    '#tune details summary{cursor:pointer;font-size:11.5px;color:#ffd98a;margin-top:4px}',
+    '#tune .msg{min-height:14px;font-size:10.5px;line-height:1.5;color:#9ad7ff}',
+    '@media (max-width:740px){#tune{width:calc(100vw - 24px)}}'
+  ].join('');
+
+  function h(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function fmt(v) {
+    return (typeof v === 'number') ? String(Math.round(v * 1000) / 1000) : String(v);
+  }
+
+  /** 一行控件：标签 + 滑条（或取色器）+ 当前值。label 包住输入，读屏能念出名字。 */
+  function row(c, T, store, after) {
+    var lab = h('label', 'row');
+    lab.appendChild(h('span', 'k', c.label));
+    var inp = document.createElement('input');
+    if (c.kind === 'color') { inp.type = 'color'; inp.value = c.get(); }
+    else {
+      inp.type = 'range';
+      inp.min = c.min; inp.max = c.max; inp.step = c.step;
+      inp.value = c.get();
+    }
+    inp.setAttribute('aria-label', c.label);
+    inp.title = c.id;
+    var out = h('output', null, fmt(c.get()));
+    inp.addEventListener('input', function () {
+      T.set(c.id, c.kind === 'color' ? inp.value : parseFloat(inp.value));
+      out.textContent = fmt(c.get());
+      T.applyLive(c.id);            // 背景色 / 电平这类要立刻作用到正在跑的对象上
+      after();
+    });
+    inp.addEventListener('change', function () {        // 松手（或选完颜色）才落盘
+      T.save(store);
+      after('已存到 fw.tune');
+    });
+    lab.appendChild(inp);
+    lab.appendChild(out);
+    return { lab: lab, inp: inp, out: out };
+  }
+
+  function mount(store) {
+    var T = FW.tune, app = FW.app.instance;
+    if (!T || !app) return null;
+    var st = document.createElement('style');
+    st.textContent = CSS;
+    document.head.appendChild(st);
+
+    var box = h('aside');
+    box.id = 'tune';
+    box.setAttribute('aria-label', '调参面板（?tune=1 时出现）');
+    var inputs = {};                                   // id -> {inp, out}，用于复位/应用后刷新
+
+    var stat = h('p', 'note');
+    var msgEl = h('p', 'msg');
+    msgEl.setAttribute('role', 'status');
+    msgEl.setAttribute('aria-live', 'polite');
+
+    function status(extra) {
+      var n = T.changed();
+      stat.textContent = '改动 ' + n + ' 项 · 存在 fw.tune（只在这里生效，不进分享链接）'
+        + (extra ? ' · ' + extra : '');
+    }
+    function after(extra) { status(extra); }
+
+    /* -------------------------------------------------------------- 标题栏 */
+
+    var head = h('div', 'head');
+    head.appendChild(h('b', null, '调参面板'));
+    var close = h('button', 'mini', '收起');
+    close.id = 'tune-close';
+    close.title = '只把这个面板收起来（按 T 再打开）；调参继续生效，复位请按「复位全部」';
+    close.addEventListener('click', function () { box.hidden = true; msgEl.textContent = '已收起（按 T 再打开）'; });
+    head.appendChild(close);
+    box.appendChild(head);
+    box.appendChild(h('p', 'note', '★ 的项是常用参数。改动对之后放的烟花生效 —— 按「放一发」或「重放」立刻看。'));
+
+    var acts = h('div', 'acts');
+    var shot = h('button', 'mini', '放一发');
+    var replay = h('button', 'mini', '重放');
+    var copy = h('button', 'mini', '复制改动 JSON');
+    var reset = h('button', 'mini', '复位全部');
+    shot.id = 'tune-shot'; replay.id = 'tune-replay';
+    copy.id = 'tune-copy'; reset.id = 'tune-reset';
+    shot.addEventListener('click', function () { app.gesture(); app.extra(); status('放了一发'); });
+    replay.addEventListener('click', function () { app.rebuild(app.seed); status('已重放'); });
+    copy.addEventListener('click', function () { copyOut(); });
+    reset.addEventListener('click', function () {
+      T.reset(store);
+      refresh();
+      msgEl.textContent = '已复位：全部回到源码默认值，fw.tune 也删掉了';
+      status();
+    });
+    acts.appendChild(shot); acts.appendChild(replay);
+    acts.appendChild(copy); acts.appendChild(reset);
+    box.appendChild(acts);
+    stat.id = 'tune-stat';
+    box.appendChild(stat);
+    box.appendChild(msgEl);
+
+    /* ------------------------------------------------------------ 常用滑条 */
+
+    var styleSec = h('section');
+    styleSec.appendChild(h('h2', null, '花型'));
+    var sel = document.createElement('select');
+    sel.id = 'tune-style';
+    sel.setAttribute('aria-label', '要调的花型');
+    Object.keys(T.styleNames).forEach(function (k) {
+      var o = document.createElement('option');
+      o.value = k;
+      o.textContent = T.styleNames[k] + ' · ' + k;
+      sel.appendChild(o);
+    });
+    sel.value = Object.keys(T.styleNames)[0];
+    sel.addEventListener('change', function () { fillStyle(sel.value); });
+    styleSec.appendChild(sel);
+    box.appendChild(styleSec);
+
+    function fillStyle(name) {
+      while (styleSec.lastChild !== sel) styleSec.removeChild(styleSec.lastChild);
+      T.group('花型 · ' + T.styleNames[name]).forEach(function (c) {
+        if (!c.star) return;
+        var r = row(c, T, store, after);
+        inputs[c.id] = r;
+        styleSec.appendChild(r.lab);
+      });
+    }
+
+    ['编排', '拥挤度曲线', '发射', '爆心', '火花', '余烬', '发射尾迹', '音效', '画面']
+      .forEach(function (group) {
+        var star = T.group(group).filter(function (c) { return c.star; });
+        if (!star.length) return;
+        var sec = h('section');
+        sec.appendChild(h('h2', null, group));
+        star.forEach(function (c) {
+          var r = row(c, T, store, after);
+          inputs[c.id] = r;
+          sec.appendChild(r.lab);
+        });
+        box.appendChild(sec);
+      });
+    fillStyle(sel.value);
+
+    /* -------------------------------------------------------- 全部参数 JSON */
+
+    var det = document.createElement('details');
+    det.appendChild(h('summary', null, '全部参数（JSON，' + T.controls().length + ' 项）'));
+    var ta = document.createElement('textarea');
+    ta.id = 'tune-json';
+    ta.spellcheck = false;
+    ta.setAttribute('aria-label', '全部参数的 JSON');
+    ta.value = T.allJson();
+    det.appendChild(ta);
+    var jacts = h('div', 'acts');
+    var apply = h('button', 'mini', '应用');
+    var reload = h('button', 'mini', '重载');
+    apply.id = 'tune-apply'; reload.id = 'tune-reload';
+    apply.addEventListener('click', function () {
+      var r = T.applyJson(ta.value);
+      if (r.ignored < 0) { msgEl.textContent = 'JSON 解析失败，什么都没改'; return; }
+      T.save(store);
+      refresh();
+      msgEl.textContent = '已应用 ' + r.applied + ' 项'
+        + (r.ignored ? '，忽略 ' + r.ignored + ' 项（名字不认识或值不合法）' : '');
+      status();
+    });
+    reload.addEventListener('click', function () { ta.value = T.allJson(); msgEl.textContent = '已重载当前值'; });
+    jacts.appendChild(apply); jacts.appendChild(reload);
+    det.appendChild(jacts);
+    box.appendChild(det);
+
+    function refresh() {
+      Object.keys(inputs).forEach(function (id) {
+        var v = T.get(id);
+        inputs[id].inp.value = v;
+        inputs[id].out.textContent = fmt(v);
+      });
+      ta.value = T.allJson();
+    }
+
+    function copyOut() {
+      var text = T.diffJson();
+      var done = function (how) { msgEl.textContent = '改动 JSON 已' + how + '（' + T.changed() + ' 项）'; };
+      var fallback = function () {
+        console.log('调参改动 JSON（贴回源码用）：\n' + text);
+        done('打到控制台');
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done('复制'); }, fallback);
+      } else fallback();
+    }
+
+    /* ------------------------------------------------------------------ 键盘 */
+
+    function toggle(e) {
+      var el = e.target || {};
+      var tag = String(el.tagName || '').toLowerCase();
+      if (tag === 'textarea' || tag === 'select') return;
+      if (tag === 'input' && /^(text|number|search|email|url|password|tel|color)$/.test(el.type || '')) return;
+      if (e.key === 't' || e.key === 'T') {
+        e.preventDefault();
+        box.hidden = !box.hidden;
+        msgEl.textContent = box.hidden ? '已收起（按 T 再打开）' : '调参面板已打开';
+      }
+    }
+
+    document.body.appendChild(box);
+    window.addEventListener('keydown', toggle);
+    status();
+    return box;
+  }
+
+  FW.tuneUi = { mount: mount };
+})(globalThis.FW || (globalThis.FW = {}));
+
 /* ===================== src/ui.js ===================== */
 /* ============================================================================
  * ui.js —— 所有 DOM：控制台、HUD、键盘、存 PNG、入口启动
@@ -2962,11 +3570,12 @@ setTimeout(function () {
       'color:#ffd34d', 'color:inherit');
   }
 
-  /** localStorage 里记三个键：上次的种子 / "每日"开关 / "声音"开关（隐私模式下会抛错，都包起来）。 */
+  /** localStorage 里记几个键：上次的种子 / "每日"开关 / "声音"开关 / 调参结果（隐私模式下会抛错，都包起来）。 */
   function store() {
     return {
       get: function (k) { try { return localStorage.getItem('fw.' + k); } catch (e) { return null; } },
-      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } }
+      set: function (k, v) { try { localStorage.setItem('fw.' + k, v); } catch (e) { /* 无所谓 */ } },
+      remove: function (k) { try { localStorage.removeItem('fw.' + k); } catch (e) { /* 无所谓 */ } }
     };
   }
 
@@ -2979,6 +3588,10 @@ setTimeout(function () {
   function boot() {
     var st = store();
     var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    // 调参面板：只有 ?tune=1 才读存储里的那份改动（这样别人打开页面永远是默认档）。
+    // 必须在构造 App 之前读 —— 背景色 / 电平 / 低通 / 减少动效降幅都是"建的时候就取一次"。
+    var tuning = !!(FW.tune && FW.tune.wanted());
+    if (tuning) FW.tune.load(st);
     var inst = new FW.app.App({
       canvas: $('stage'),
       search: new URLSearchParams(location.search),
@@ -2987,6 +3600,7 @@ setTimeout(function () {
       reducedMotion: !!(mq && mq.matches)
     });
     FW.app.instance = inst;
+    if (tuning) FW.tuneUi.mount(st);
     if (mq) inst.bindReducedMotion(mq);
     inst.start();
     inst.syncPanel();                    // 声音开关的 aria 状态要一开始就对

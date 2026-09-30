@@ -20,6 +20,12 @@
   var toHex = core.toHex, RAD2DEG = core.RAD2DEG;
 
   /**
+   * 背景色（调参面板可改，见 src/tune.js）：默认就是原版那个深蓝 core.BG。
+   * 这里放成一个对象是为了让面板拿到**引用**原地改，而不是各模块各存一份。
+   */
+  var BG = { hex: toHex(core.BG) };
+
+  /**
    * @param {HTMLCanvasElement} canvas
    * 逻辑尺寸由 Show 决定（每个场景一个），屏幕尺寸由窗口决定；
    * 两边不一致时按等比缩放居中（original 场景固定 924×691，所以窗口再大也
@@ -29,7 +35,7 @@
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.maxDpr = maxDpr === undefined ? 2 : maxDpr;
-    this.bg = toHex(core.BG);
+    this.bg = BG.hex;
     this.geos = 0;
     this.segs = 0;          // 本帧实际描边的线段数（增强模式会远超图元数）
     this.layout(1, 1);
@@ -115,5 +121,8 @@
   /** 导出 PNG 用的 dataURL（浏览器 Canvas 自带，不用手写 zlib/PNG）。 */
   Renderer.prototype.toDataURL = function () { return this.canvas.toDataURL('image/png'); };
 
-  FW.view = { Renderer: Renderer };
+  /** 换背景色（调参面板用）：下一次重绘就生效，不用重建渲染器。 */
+  Renderer.prototype.setBg = function (hex) { this.bg = hex; return this.bg; };
+
+  FW.view = { Renderer: Renderer, BG: BG };
 })(globalThis.FW || (globalThis.FW = {}));

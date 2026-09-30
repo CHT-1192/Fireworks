@@ -254,7 +254,8 @@ if (!/^\d+$/.test(bogus.seed)) loopProblems.push(`乱敲的字母种子应退回
 const fakeStore = (data) => ({
   data,
   get(k) { return this.data[k] === undefined ? null : this.data[k]; },
-  set(k, v) { this.data[k] = v; }
+  set(k, v) { this.data[k] = v; },
+  remove(k) { delete this.data[k]; }
 });
 const plain = makeApp('seed=7&w=924&h=691');
 const eggStore = fakeStore({ seed: '7' });
@@ -413,6 +414,119 @@ if (loopProblems.length) {
 }
 console.log('─'.repeat(76));
 for (const p of loopProblems) problems.push(p);
+
+/* ------------------------------------------------ 3) 调参面板的参数表 */
+
+/**
+ * 调参面板（src/tune.js + src/tune_ui.js）只做一件事：**原地改写**各模块里那些
+ * 本来是常量的对象。所以这里守三条：
+ *   ① 面板上每一行的默认值都必须正好落在滑条的格子上 —— 否则浏览器会把 value
+ *      吸附到最近一格，一打开面板默认值就被悄悄挪走（还会被当成"改动"存下来）；
+ *   ② 不改 = 行为逐位不变：复位之后跑出来的指纹必须与从没碰过时一模一样；
+ *   ③ 只存/只导出"改过的那几项"，认不出的键一律忽略 —— 以后源码默认值改了，
+ *      旧机器上那份记录也不会把它盖回去。
+ */
+const tuneProblems = [];
+const T = FW.tune;
+
+function tuneFingerprint() {
+  const show = new FW.show.Show(924, 691, new FW.rng.Random(7),
+                                { maxGeos: FW.show.DEFAULT_GEOS });
+  FW.show.build(show);
+  let h = 0;
+  for (let i = 0; i < 180; i++) {
+    show.step(i === 0 ? 0 : 1 / 60);
+    h = (h * 31 + show.lastGeos + show.elements.length * 7 + show.frameGeos.length) % 1000000007;
+  }
+  return h;
+}
+
+// 3.1 默认值必须在格子上（面板一打开就不该是"改动过"的状态）
+for (const c of T.controls()) {
+  if (c.kind !== 'number') continue;
+  const v = c.get(), x = (v - c.min) / c.step;
+  if (!(v >= c.min && v <= c.max)) {
+    tuneProblems.push(`${c.id} 默认值 ${v} 不在 [${c.min}, ${c.max}] 里`);
+  } else if (Math.abs(x - Math.round(x)) > 1e-6) {
+    tuneProblems.push(`${c.id} 默认值 ${v} 不在格子上（min ${c.min} / step ${c.step}）`);
+  }
+}
+
+// 3.2 只有 ?tune=1 认账
+global.location.search = '?seed=7';
+if (T.wanted()) tuneProblems.push('没有 ?tune=1 时不该认调参');
+global.location.search = '?tune=10';
+if (T.wanted()) tuneProblems.push('?tune=10 不该被当成 ?tune=1');
+global.location.search = '?seed=7&tune=1';
+if (!T.wanted()) tuneProblems.push('?tune=1 时应当认调参');
+
+// 3.3 默认状态下"一项都没改"；存储里认不出的键一律忽略
+const tstore = fakeStore({});
+if (T.changed() !== 0 || T.load(tstore) !== 0 || T.changed() !== 0) {
+  tuneProblems.push('默认状态下不该有任何改动：' + T.diffJson());
+}
+const weirdStore = fakeStore({ tune: JSON.stringify({ 'nope.nope': 1, 'phys.flashLife': 'x' }) });
+if (T.load(weirdStore) !== 0 || T.changed() !== 0) {
+  tuneProblems.push('存储里认不出的键不该被采用：' + T.diffJson());
+}
+
+// 3.4 改一项：演出真的变、只导出/只落盘这一项
+const defPrint = tuneFingerprint();
+T.set('phys.flashLife', 0.5);
+const oneDiff = JSON.parse(T.diffJson());
+if (Object.keys(oneDiff).length !== 1 || oneDiff['phys.flashLife'] !== 0.5) {
+  tuneProblems.push('改动清单不止一项：' + T.diffJson());
+}
+if (T.save(tstore) !== 1 || JSON.parse(tstore.data.tune)['phys.flashLife'] !== 0.5) {
+  tuneProblems.push('落盘的不是"只改过的那一项"：' + tstore.data.tune);
+}
+if (tuneFingerprint() === defPrint) tuneProblems.push('改了参数但演出没有任何变化');
+
+// 3.5 复位：回到与默认逐位一致，存储里的键也删掉
+T.reset(tstore);
+if (T.changed() !== 0 || tstore.data.tune !== undefined) {
+  tuneProblems.push('复位没有清干净：' + JSON.stringify(tstore.data));
+}
+if (tuneFingerprint() !== defPrint) tuneProblems.push('复位之后没有回到与默认逐位一致');
+
+// 3.6 存储里那份改动读得回来（重开页面走的就是这条路）
+const d0 = T.get('styles.willow.life.1');
+T.set('styles.willow.life.1', d0 + 0.4);
+T.save(tstore);
+T.set('styles.willow.life.1', d0);                    // 手动回默认，假装"新开的页面"
+if (T.load(tstore) !== 1 || T.get('styles.willow.life.1') !== d0 + 0.4) {
+  tuneProblems.push('存储里的改动没被读回来：' + tstore.data.tune);
+}
+T.reset(tstore);
+
+// 3.7 "全部参数" JSON：往返 + 认不出的键忽略 + 解析失败不炸
+if (Object.keys(JSON.parse(T.allJson())).length !== T.controls().length) {
+  tuneProblems.push('"全部参数"漏了项：' + T.allJson().length);
+}
+const ar = T.applyJson(JSON.stringify({ 'phys.flashLife': 0.9, 'nope': 5 }));
+if (ar.applied !== 1 || ar.ignored !== 1 || Math.abs(T.get('phys.flashLife') - 0.9) > 1e-9) {
+  tuneProblems.push('applyJson 结果不对：' + JSON.stringify(ar));
+}
+if (T.applyJson('{oops').ignored !== -1) tuneProblems.push('JSON 解析失败应当报 -1');
+T.reset(tstore);
+if (T.changed() !== 0) tuneProblems.push('收尾没复位干净');
+
+// 3.8 分享链接里不带调参（别人打开必须是默认档）
+const tuneApp = makeApp('seed=7&tune=1');
+if (/tune/.test(tuneApp.shareUrl())) tuneProblems.push('分享链接里带了 tune：' + tuneApp.shareUrl());
+
+const starCount = T.controls().filter((c) => c.star).length;
+console.log('调参面板自检（参数表 / 默认值 / 落盘 / 复位）');
+console.log('─'.repeat(76));
+if (tuneProblems.length) {
+  for (const p of tuneProblems) console.log('  ✗ ' + p);
+} else {
+  console.log(`  OK   ${T.controls().length} 项参数（★ ${starCount} 项；面板按花型切换，同时展开 43 条滑条）默认值都在格子上；`
+    + `复位后指纹 ${defPrint} 与默认逐位一致；只落盘改过的项、认不出的键忽略`);
+}
+console.log('─'.repeat(76));
+for (const p of tuneProblems) problems.push(p);
+global.location.search = '';
 
 /* ------------------------------------------------ 结论 */
 

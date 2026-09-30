@@ -16,6 +16,31 @@
   var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo;
   var DENSE = data.DENSE;
 
+  /**
+   * 元素的物理与画法参数（**整体可调**，见调参面板 src/tune.js）。
+   * 默认值就是原来写死在各个方法里的那些数，一个都没动 —— 面板只改这个对象。
+   */
+  var PHYS = {
+    flashLife: 0.22,          // 爆心闪光寿命
+    flashFade: 1.6,           // 变暗曲线指数（越大越快暗下去）
+    flashShrink: [0.35, 0.65],// 边暗边缩：基础半径 + 随亮度收缩的部分
+    emberGravity: 150.0,      // 余烬下坠
+    emberDrag: 0.8,           // 余烬横向阻尼
+    emberTwinkleAt: 0.75,     // 出生时随机数大于它 -> 这颗余烬会闪
+    emberTwinkleHz: 22.0,
+    emberSize: [0.4, 0.6],    // 余烬半径 = size × (这个)
+    emberLife: [0.5, 1.3],    // 火花掉下来的余烬寿命
+    emberSizeK: 0.42,         // 火花掉下来的余烬大小（× 火花半径）
+    sparkTrailStep: 12.0,     // 轨迹采样步长（像素）：够远了才记一个点
+    sparkShade: 0.8,          // 火花变暗曲线指数
+    sparkTwinkleBelow: 0.34,  // 亮度掉到这个比例以下才可能闪
+    sparkTwinkleChance: 0.35,
+    sparkTrailWidth: 0.16,    // 尾迹半宽 = 火花半径 × 这个
+    trailFade: 3.4,           // 发射尾迹（弹体烟迹）整条散掉要多久
+    trailStep: 9.0,           // 尾迹采样步长
+    trailMaxPts: 80
+  };
+
   /* ------------------------------------------------------------ 基类 */
 
   function Element(show) {
@@ -33,7 +58,7 @@
     this.size = size === undefined ? 34.0 : size;
     this.palette = palette;
     this.age = 0.0;
-    this.life = 0.22;
+    this.life = PHYS.flashLife;
   }
   Flash.prototype = Object.create(Element.prototype);
   Flash.prototype.constructor = Flash;
@@ -45,8 +70,9 @@
 
   Flash.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);   // 死亡那帧 age 会略微超过 life
-    var r = Math.max(0.5, this.size * (0.35 + 0.65 * k) * Math.sqrt(k));  // 边暗边缩
-    return [geo(DOT, fade(this.palette.core, Math.pow(k, 1.6)), this.x, this.y, 0.0, r, r)];
+    var shrink = PHYS.flashShrink;
+    var r = Math.max(0.5, this.size * (shrink[0] + shrink[1] * k) * Math.sqrt(k));
+    return [geo(DOT, fade(this.palette.core, Math.pow(k, PHYS.flashFade)), this.x, this.y, 0.0, r, r)];
   };
 
   /* ------------------------------------------------ 余烬：掉下来的小碎屑 */
@@ -66,8 +92,8 @@
 
   Ember.prototype.update = function (dt) {
     this.age += dt;
-    this.vy -= 150.0 * dt;
-    this.vx *= Math.exp(-0.8 * dt);
+    this.vy -= PHYS.emberGravity * dt;
+    this.vx *= Math.exp(-PHYS.emberDrag * dt);
     this.x += this.vx * dt;
     this.y += this.vy * dt;
     if (this.age >= this.life) this.alive = false;
@@ -75,8 +101,11 @@
 
   Ember.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);
-    if (this.twinkle > 0.75) k *= 0.35 + 0.65 * Math.abs(Math.sin(this.age * 22.0));
-    var r = Math.max(0.5, this.size * (0.4 + 0.6 * k));
+    var es = PHYS.emberSize;
+    if (this.twinkle > PHYS.emberTwinkleAt) {
+      k *= 0.35 + 0.65 * Math.abs(Math.sin(this.age * PHYS.emberTwinkleHz));
+    }
+    var r = Math.max(0.5, this.size * (es[0] + es[1] * k));
     return [geo(DOT, fade(this.color, k), this.x, this.y, 0.0, r, r)];
   };
 
@@ -104,7 +133,7 @@
     this.drag = o.drag;
     this.trailTime = o.trailTime === undefined ? 0.0 : o.trailTime;
     this.trailSeg = Math.max(1, o.trailSeg === undefined ? 3 : o.trailSeg);
-    this.trailStep = o.trailStep === undefined ? 12.0 : o.trailStep;
+    this.trailStep = o.trailStep === undefined ? PHYS.sparkTrailStep : o.trailStep;
     this.emberRate = o.emberRate === undefined ? 0.0 : o.emberRate;
     this.twinkle = o.twinkle === undefined ? true : o.twinkle;
     this.emberAcc = 0.0;
@@ -140,8 +169,8 @@
         this.show.add(new Ember(this.show, this.x, this.y,
                                 this.vx * 0.25 + this.show.rng.uniform(-14, 14),
                                 this.vy * 0.2 + this.show.rng.uniform(-10, 6),
-                                this.trailHot, this.size * 0.42,
-                                this.show.rng.uniform(0.5, 1.3)));
+                                this.trailHot, this.size * PHYS.emberSizeK,
+                                this.show.rng.uniform(PHYS.emberLife[0], PHYS.emberLife[1])));
       }
     }
     if (this.age >= this.life) this.alive = false;
@@ -157,15 +186,16 @@
       var age = now - (a[2] + b[2]) * 0.5;
       var fresh = Math.max(0.0, 1.0 - age / this.trailTime) * (0.35 + 0.65 * shade);
       segs.push([a[0], a[1], b[0], b[1], mix(this.trailCool, this.trailHot, fresh),
-                 Math.max(0.5, this.size * 0.16 * (0.5 + 0.5 * fresh))]);
+                 Math.max(0.5, this.size * PHYS.sparkTrailWidth * (0.5 + 0.5 * fresh))]);
     }
     return segs;
   };
 
   Spark.prototype.frame = function () {
     var k = Math.max(0.0, 1.0 - this.age / this.life);
-    var shade = Math.pow(k, 0.8);                         // 变暗曲线
-    if (this.twinkle && k < 0.34 && this.show.rng.random() < 0.35) {
+    var shade = Math.pow(k, PHYS.sparkShade);             // 变暗曲线
+    if (this.twinkle && k < PHYS.sparkTwinkleBelow
+        && this.show.rng.random() < PHYS.sparkTwinkleChance) {
       shade *= this.show.rng.uniform(0.15, 1.0);          // 末期随机闪烁
     }
     var geos = [];
@@ -182,5 +212,5 @@
     return geos;
   };
 
-  FW.elements = { Element: Element, Flash: Flash, Ember: Ember, Spark: Spark };
+  FW.elements = { Element: Element, Flash: Flash, Ember: Ember, Spark: Spark, PHYS: PHYS };
 })(globalThis.FW || (globalThis.FW = {}));

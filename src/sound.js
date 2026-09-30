@@ -18,23 +18,31 @@
   }
 
   /**
-   * 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。
-   * 注意是**只压不丢**：超预算的那一声仍然响，只是音量压到 SQUEEZED。
-   * 早先的版本直接丢音，实测 max=1500 时 30 秒丢掉 10/60 个事件 —— 听起来就是
-   * "怎么有时候跳过一些"。
+   * 音效的可调参数（**整体可调**，见调参面板 src/tune.js），默认值就是原来写死的那些：
+   *   BUDGET 同时发声的预算：齐射时别叠 16 个爆炸声（叠了只会糊成一片爆音）。
+   *          注意是**只压不丢**：超预算的那一声仍然响，只是音量压到 squeezed。
+   *          早先的版本直接丢音，实测 max=1500 时 30 秒丢掉 10/60 个事件 ——
+   *          听起来就是"怎么有时候跳过一些"。
+   *   LEVEL  整体电平（分层增益保持相对比例）
+   *   CRISP  爆炸音的"脆/闷"：base 是与参考录音对齐的那一档，spread 是每发的
+   *          随机幅度，壳大（radius 大）偏闷 —— shellRef/shellSpan 就是这个斜率
+   *   TONE   主链低通（真实录音顶上是滚降的）
    */
-  var TOKENS_MAX = 8, TOKENS_PER_SEC = 8, SQUEEZED = 0.45;
+  var BUDGET = { max: 8, perSec: 8, squeezed: 0.45 };
+  var LEVEL = { init: 0.6 };
+  var CRISP = { base: 0.58, spread: 0.44, shellRef: 200, shellSpan: 450 };
+  var TONE = { hz: 15000 };
 
   function Engine(o) {
     o = o || {};
-    this.level = (o.level === undefined) ? 0.6 : o.level;   // 整体电平（分层增益保持相对比例）
+    this.level = (o.level === undefined) ? LEVEL.init : o.level;
     this.enabled = o.enabled !== false;
     this.ctx = o.context || null;        // 注入上下文 = 离线渲染（tools/sound_shot.js 用）
     this.comp = null;
     this.master = null;
     this.mix = null;                 // 录制用的音频输出（MediaStreamDestination）
     this.buf = null;                 // 复用的白噪声
-    this.tokens = TOKENS_MAX;
+    this.tokens = BUDGET.max;
     this.refillAt = 0;
     this.launches = 0;
     this.bursts = 0;
@@ -65,7 +73,7 @@
     // 低通 17kHz：真实录音的顶上是滚降的，白噪声一路到 24k 听着会"太嘶"
     this.tone = ctx.createBiquadFilter();
     this.tone.type = 'lowpass';
-    this.tone.frequency.value = 15000;
+    this.tone.frequency.value = TONE.hz;
     this.tone.Q.value = 0.4;
     this.comp.connect(this.tone);
     this.tone.connect(this.master);
@@ -81,6 +89,20 @@
   Engine.prototype.resume = function () {
     var ctx = this.ctx;
     if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume();
+  };
+
+  /** 整体电平（调参面板用）：立刻作用到主增益上，开关状态不变。 */
+  Engine.prototype.setLevel = function (v) {
+    this.level = v;
+    if (this.master) this.master.gain.value = this.enabled ? v : 0;
+    return this.level;
+  };
+
+  /** 主链低通频率（调参面板用）：上下文还没建就只记下数值。 */
+  Engine.prototype.setTone = function (hz) {
+    TONE.hz = hz;
+    if (this.tone) this.tone.frequency.value = hz;
+    return hz;
   };
 
   Engine.prototype.setEnabled = function (on) {
@@ -108,13 +130,13 @@
   Engine.prototype.gainFactor = function () {
     var now = this.ctx ? this.ctx.currentTime : 0;
     if (now > this.refillAt) {                       // 按过去的时间补名额（不是每查一次补一个）
-      var add = Math.floor((now - this.refillAt) * TOKENS_PER_SEC) + 1;
-      this.tokens = Math.min(TOKENS_MAX, this.tokens + add);
-      this.refillAt = now + 1 / TOKENS_PER_SEC;
+      var add = Math.floor((now - this.refillAt) * BUDGET.perSec) + 1;
+      this.tokens = Math.min(BUDGET.max, this.tokens + add);
+      this.refillAt = now + 1 / BUDGET.perSec;
     }
     if (this.tokens > 0) { this.tokens--; return 1; }
     this.squeezed++;
-    return SQUEEZED;
+    return BUDGET.squeezed;
   };
 
 
@@ -187,10 +209,13 @@
     var t = ctx.currentTime + 0.01;
     var k = this.gainFactor();                           // 齐射时压小，但不丢
     // 脆/闷：壳大偏闷，另外每发都有点不同（真实爆炸声本来就不一样）
-    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp : 0.58 + (Math.random() - 0.5) * 0.44;
-    if (ev && ev.radius) crisp += (200 - ev.radius) / 450;      // 半径大 → 更闷
+    var crisp = (ev && ev.crisp !== undefined) ? ev.crisp
+              : CRISP.base + (Math.random() - 0.5) * CRISP.spread;
+    if (ev && ev.radius) {      // 半径大 → 更闷
+      crisp += (CRISP.shellRef - ev.radius) / CRISP.shellSpan;
+    }
     crisp = Math.max(0.05, Math.min(0.98, crisp));
-    var c = crisp - 0.58;          // 下面每层都写成「0.58 时调好的值 + c×跨度」：
+    var c = crisp - CRISP.base;    // 下面每层都写成「基准档调好的值 + c×跨度」：
                                    // 默认那档仍与参考录音对齐，两端则明显更脆/更闷
 
     // 1) 脉冲 + 脆响：1ms 起音的高通噪声（频谱上是那根竖线），脆则更亮更响
@@ -235,5 +260,6 @@
     else if (ev.type === 'burst') this.burst(ev);
   };
 
-  FW.sound = { Engine: Engine, supported: supported };
+  FW.sound = { Engine: Engine, supported: supported,
+               BUDGET: BUDGET, LEVEL: LEVEL, CRISP: CRISP, TONE: TONE };
 })(globalThis.FW || (globalThis.FW = {}));

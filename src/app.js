@@ -121,7 +121,7 @@
   App.prototype.setReduceMotion = function (on) {
     this.reduceMotion = !!on;
     this.show.auto = !this.reduceMotion;
-    this.show.motionScale = this.reduceMotion ? 0.55 : 1.0;
+    this.show.motionScale = this.reduceMotion ? FW.tune.MOTION.reduced : 1.0;
     return this.reduceMotion;
   };
 

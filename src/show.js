@@ -39,12 +39,31 @@
     this.motionScale = 1.0;                 // 每发规模的额外缩放（"减少动效"时压低）
     this.time = 0.0;
     this.nextSpawn = 0.0;
-    this.nextFinale = rng.uniform(14.0, 22.0);
+    this.nextFinale = rng.uniform(ORCH.firstFinaleMin, ORCH.firstFinaleMax);
   }
 
   /* -------------------------------------------------------------- 元素 */
 
   Show.prototype.add = function (e) { this.elements.push(e); };
+
+  /**
+   * 演出节奏与构图（**整体可调**，见调参面板 src/tune.js）：
+   *   *Min/*Max 是秒数区间，会再除以拥挤度；crowd 是"画面拥挤度 -> 放量倍率"的阶梯
+   *   （从最满到最空，第一档命中即返回）。这里全部是**读的时候取一次**，
+   *   所以面板改动立刻对之后的发射生效，默认值就是原来写死的那些。
+   */
+  var ORCH = {
+    spawnMin: 0.9, spawnMax: 2.3,               // 常规发射间隔
+    finaleMin: 18.0, finaleMax: 30.0,           // 齐射间隔
+    firstFinaleMin: 14.0, firstFinaleMax: 22.0, // 开播后第一波齐射
+    salvoMin: 2, salvoMax: 4,                   // 一波齐射几发
+    densityCap: 2.0,                            // 每发规模上限（别让单发变成一颗巨型球）
+    elementRatio: 0.6,                          // 元素表上限 = 预算 × 这个
+    xSpread: 0.42, drift: 0.20, xLimit: 0.46,   // 发射点水平散布 / 横飘 / 硬边界
+    yMin: 0.06, yMax: 0.46,                     // 爆心高度区间
+    crowd: [[1.15, 0.25], [0.95, 0.40], [0.72, 0.65], [0.48, 1.0],
+            [0.28, 1.5], [0.12, 2.2], [0, 3.0]]
+  };
 
   /**
    * 拥挤度 -> 放量倍率。上一帧的实际图元数 / 预算 就是拥挤度：
@@ -53,19 +72,14 @@
    */
   Show.prototype.crowd = function () {
     if (this.maxGeos <= 0) return 1.0;
-    var load = this.lastGeos / this.maxGeos;
-    if (load >= 1.15) return 0.25;      // 超了：明显收敛
-    if (load >= 0.95) return 0.40;
-    if (load >= 0.72) return 0.65;
-    if (load >= 0.48) return 1.0;       // 差不多：按原样
-    if (load >= 0.28) return 1.5;       // 还空：多发、每发大一点
-    if (load >= 0.12) return 2.2;
-    return 3.0;                         // 空得很：铺满
+    var load = this.lastGeos / this.maxGeos, c = ORCH.crowd;
+    for (var i = 0; i < c.length; i++) if (load >= c[i][0]) return c[i][1];
+    return 1.0;
   };
 
-  /** 每发的规模倍率（封顶 2：别让单发变成一颗巨型球）。motionScale 是"减少动效"的降幅。 */
+  /** 每发的规模倍率（封顶见 ORCH.densityCap）。motionScale 是"减少动效"的降幅。 */
   Show.prototype.density = function () {
-    return Math.min(2, this.crowd()) * this.motionScale;
+    return Math.min(ORCH.densityCap, this.crowd()) * this.motionScale;
   };
 
   /** 发射节奏倍率：间隔除以它。 */
@@ -78,7 +92,7 @@
 
   /** 元素表的安全上限：按预算缩放（原来写死 260，预算调大后会把画面卡住）。 */
   Show.prototype.elementCap = function () {
-    return (this.maxGeos > 0) ? Math.round(this.maxGeos * 0.6) : 2000;
+    return (this.maxGeos > 0) ? Math.round(this.maxGeos * ORCH.elementRatio) : 2000;
   };
 
   Show.prototype.spawn = function (style, launch, burst, palette, o) {
@@ -102,10 +116,10 @@
   /** 随机发射点 / 爆心。 */
   Show.prototype.randomLaunch = function () {
     var rng = this.rng;
-    var x0 = rng.uniform(-0.42, 0.42) * this.w;
-    var x1 = Math.max(-0.46 * this.w,
-                      Math.min(0.46 * this.w, x0 + rng.uniform(-0.20, 0.20) * this.w));
-    var y1 = rng.uniform(0.06, 0.46) * this.h;          // 中上部炸开
+    var x0 = rng.uniform(-ORCH.xSpread, ORCH.xSpread) * this.w;
+    var x1 = Math.max(-ORCH.xLimit * this.w,
+                      Math.min(ORCH.xLimit * this.w, x0 + rng.uniform(-ORCH.drift, ORCH.drift) * this.w));
+    var y1 = rng.uniform(ORCH.yMin, ORCH.yMax) * this.h;   // 中上部炸开
     return [[x0, -this.h / 2 - 6], [x1, y1]];
   };
 
@@ -169,11 +183,11 @@
     //    auto = false 时完全不自动排（系统开了"减少动效"）：只有你按 R / 点画面才放。
     if (!this.auto) return;
     if (this.time >= this.nextFinale) {
-      this.nextFinale = this.time + this.rng.uniform(18.0, 30.0) / this.pace();
-      this.spawnRandom(Math.round(this.rng.randint(2, 4) * this.density()));
+      this.nextFinale = this.time + this.rng.uniform(ORCH.finaleMin, ORCH.finaleMax) / this.pace();
+      this.spawnRandom(Math.round(this.rng.randint(ORCH.salvoMin, ORCH.salvoMax) * this.density()));
       this.nextSpawn = this.time + 2.0;
     } else if (this.time >= this.nextSpawn) {
-      this.nextSpawn = this.time + this.rng.uniform(0.9, 2.3) / this.pace();
+      this.nextSpawn = this.time + this.rng.uniform(ORCH.spawnMin, ORCH.spawnMax) / this.pace();
       this.spawnRandom(1);
     }
   };
@@ -183,5 +197,5 @@
     show.spawnRandom(2);
   }
 
-  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS };
+  FW.show = { Show: Show, build: build, DEFAULT_GEOS: DEFAULT_GEOS, ORCH: ORCH };
 })(globalThis.FW || (globalThis.FW = {}));

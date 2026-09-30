@@ -726,6 +726,181 @@ async function checkA11y(browser) {
   return bad;
 }
 
+/* -------------------------------------------  F) 调参面板（?tune=1） */
+
+/**
+ * 调参面板只在 `?tune=1` 时出现，而且**只有这时候才读存储里的那份改动** ——
+ * 所以别人打开页面永远是默认档。这一段验四件事：
+ *   ① 不带 ?tune=1：没有面板、存储里的调参不生效（哪怕它就在那儿）；
+ *   ② 拖一条滑条：原地改到真身上、落盘、并且"活"的项（背景色/电平）立刻生效；
+ *   ③ 刷新后仍然生效（?tune=1 时读回来的）；
+ *   ④ 「复位全部」把值和存储都清回默认，分享链接里不带调参。
+ */
+async function checkTune(browser) {
+  console.log('\nF) 调参面板');
+  if (!browser) {
+    console.log('  跳过：没有浏览器');
+    return 0;
+  }
+  let bad = 0;
+  const problems = [];
+  const steps = [];
+
+  // F1) 不带 ?tune=1：页面照旧，存储里那份改动不该生效
+  const plain = await pw.openPage(browser, BASE + '/?seed=7&max=900',
+                                  { viewport: { width: 1280, height: 800 } });
+  await plain.page.evaluate(() => {
+    localStorage.setItem('fw.tune', JSON.stringify({ 'phys.flashLife': 0.9,
+                                                     'bg.hex': '#123456' }));
+  });
+  await plain.page.reload();
+  await plain.page.waitForTimeout(400);
+  const off = await plain.page.evaluate(() => ({
+    panel: !!document.getElementById('tune'),
+    wanted: FW.tune.wanted(),
+    flash: FW.elements.PHYS.flashLife,
+    bg: FW.app.instance.renderer.bg,
+    stored: !!localStorage.getItem('fw.tune')
+  }));
+  if (off.panel) problems.push('没有 ?tune=1 时不该有调参面板');
+  if (off.wanted) problems.push('没有 ?tune=1 时 wanted() 应当是 false');
+  if (off.flash !== 0.22) problems.push('没有 ?tune=1 时存储里的调参不该生效：' + off.flash);
+  if (off.bg !== '#000020') problems.push('没有 ?tune=1 时背景色应保持默认：' + off.bg);
+  steps.push(`不带 ?tune=1：无面板，存储里那份（还在：${off.stored}）不生效`);
+  await plain.page.close();
+
+  // F2) ?tune=1：面板出现，默认状态下"零改动"
+  const { page, logs } = await pw.openPage(browser, BASE + '/?seed=7&max=900&tune=1',
+                                           { viewport: { width: 1280, height: 800 } });
+  await page.waitForTimeout(500);
+  const on = await page.evaluate(() => ({
+    panel: !!document.getElementById('tune'),
+    label: document.getElementById('tune').getAttribute('aria-label'),
+    changed: FW.tune.changed(),
+    sliders: document.querySelectorAll('#tune input[type=range]').length,
+    labeled: Array.from(document.querySelectorAll('#tune input[type=range]'))
+      .every((e) => !!(e.getAttribute('aria-label') || e.closest('label'))),
+    total: FW.tune.controls().length,
+    stored: localStorage.getItem('fw.tune')
+  }));
+  if (!on.panel) problems.push('?tune=1 时应该出现调参面板');
+  if (!on.label) problems.push('调参面板缺少无障碍名称');
+  if (on.changed !== 0) problems.push('刚打开面板就有"改动"：' + on.changed);
+  if (!(on.sliders > 20)) problems.push('面板上的滑条太少：' + on.sliders);
+  if (!on.labeled) problems.push('有滑条没有无障碍名称');
+  steps.push(`?tune=1：面板 ${on.sliders} 个滑条（共 ${on.total} 项参数可调），默认零改动`);
+
+  // F3) 拖一条滑条：改到真身 + 落盘（只存改过的那一项）
+  const drag = async (id, v) => page.evaluate(([tid, tv]) => {
+    const inp = document.querySelector('#tune input[title="' + tid + '"]');
+    if (!inp) return false;
+    inp.value = tv;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }, [id, String(v)]);
+  if (!await drag('phys.flashLife', 0.6)) problems.push('面板上找不到 flashLife 这条滑条');
+  if (!await drag('bg.hex', '#101010')) problems.push('面板上找不到背景色');
+  if (!await drag('level.init', 0.3)) problems.push('面板上找不到整体电平');
+  await page.waitForTimeout(200);
+  const tuned = await page.evaluate(() => ({
+    flash: FW.elements.PHYS.flashLife,
+    bg: FW.app.instance.renderer.bg,
+    level: FW.app.instance.sound ? FW.app.instance.sound.level : null,
+    gain: (FW.app.instance.sound && FW.app.instance.sound.master)
+      ? FW.app.instance.sound.master.gain.value : null,
+    changed: FW.tune.changed(),
+    stored: JSON.parse(localStorage.getItem('fw.tune') || '{}'),
+    stat: document.getElementById('tune-stat').textContent
+  }));
+  if (tuned.flash !== 0.6) problems.push('滑条没改到真身上：' + tuned.flash);
+  if (tuned.bg !== '#101010') problems.push('背景色没有立刻生效：' + tuned.bg);
+  if (tuned.level !== 0.3) problems.push('电平没有立刻生效：' + tuned.level);
+  if (tuned.gain !== null && tuned.gain !== 0.3 && tuned.gain !== 0) {
+    problems.push('电平没有作用到主增益上：' + tuned.gain);
+  }
+  if (tuned.changed !== 3) problems.push('改动计数不对：' + tuned.changed);
+  if (tuned.stored['phys.flashLife'] !== 0.6 || tuned.stored['bg.hex'] !== '#101010') {
+    problems.push('改动没落盘：' + JSON.stringify(tuned.stored));
+  }
+  if (!/改动 3 项/.test(tuned.stat)) problems.push('面板上的状态行不对：' + tuned.stat);
+  steps.push(`拖滑条：flashLife -> ${tuned.flash}、背景 -> ${tuned.bg}、电平 -> ${tuned.level}`
+    + `（fw.tune 只存这 3 项）`);
+
+  // F4) 刷新（仍然 ?tune=1）：改动读得回来
+  await page.reload();
+  await page.waitForTimeout(500);
+  const back = await page.evaluate(() => ({
+    flash: FW.elements.PHYS.flashLife,
+    bg: FW.app.instance.renderer.bg,
+    changed: FW.tune.changed(),
+    shown: document.querySelector('#tune input[title="phys.flashLife"]').value
+  }));
+  if (back.flash !== 0.6 || back.bg !== '#101010' || back.changed !== 3) {
+    problems.push('刷新后改动丢了：' + JSON.stringify(back));
+  }
+  if (Number(back.shown) !== 0.6) problems.push('滑条没跟着读回来的值走：' + back.shown);
+  steps.push(`刷新后仍然生效：flashLife ${back.flash}、背景 ${back.bg}，滑条位置也对`);
+
+  // F5) 花型选择器 + "全部参数" JSON
+  await page.selectOption('#tune-style', 'cloud');
+  const pick = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#tune input[type=range]')).map((e) => e.title)
+    .filter((t) => /^styles\./.test(t)));
+  if (!pick.length || !pick.every((t) => /^styles\.cloud\./.test(t))) {
+    problems.push('切花型之后滑条没跟着换：' + pick.join(','));
+  }
+  await page.evaluate(() => {
+    document.getElementById('tune-json').value = JSON.stringify({ 'phys.emberGravity': 200 });
+    document.getElementById('tune-apply').click();
+  });
+  await page.waitForTimeout(150);
+  const applied = await page.evaluate(() => ({
+    g: FW.elements.PHYS.emberGravity,
+    changed: FW.tune.changed(),
+    said: document.querySelector('#tune .msg').textContent
+  }));
+  if (applied.g !== 200) problems.push('"全部参数"没应用上：' + applied.g);
+  if (applied.changed !== 4) problems.push('应用后改动计数不对：' + applied.changed);
+  steps.push(`切花型 -> cloud（${pick.length} 条滑条）；全部参数 JSON 应用 1 项（${applied.said.slice(0, 24)}）`);
+
+  // F6) 调参不进分享链接；「复位全部」把值和存储都清回默认
+  const share = await page.evaluate(() => FW.app.instance.shareUrl());
+  if (/tune/.test(share)) problems.push('分享链接里带了调参：' + share);
+  await page.click('#tune-reset');
+  await page.waitForTimeout(150);
+  const reset = await page.evaluate(() => ({
+    flash: FW.elements.PHYS.flashLife,
+    bg: FW.app.instance.renderer.bg,
+    g: FW.elements.PHYS.emberGravity,
+    changed: FW.tune.changed(),
+    stored: localStorage.getItem('fw.tune'),
+    said: document.querySelector('#tune .msg').textContent
+  }));
+  if (reset.flash !== 0.22 || reset.bg !== '#000020' || reset.g !== 150 || reset.changed !== 0) {
+    problems.push('复位没回到默认：' + JSON.stringify(reset));
+  }
+  if (reset.stored !== null) problems.push('复位后 fw.tune 还在：' + reset.stored);
+  steps.push(`复位：三项全回默认、fw.tune 已删（「${reset.said.slice(0, 16)}」）；分享链接 ${share} 不带 tune`);
+
+  // F7) T 键收起 / 再打开（Esc 仍然归"收起控制台"用）
+  await page.keyboard.press('t');
+  const hide1 = await page.evaluate(() => document.getElementById('tune').hidden);
+  await page.keyboard.press('t');
+  const hide2 = await page.evaluate(() => document.getElementById('tune').hidden);
+  if (!hide1 || hide2) problems.push(`T 键收起/打开不工作：${hide1} / ${hide2}`);
+  steps.push('T 键：收起 -> 再打开 ✓');
+
+  const crash = logs.filter((x) => /Uncaught|TypeError|ReferenceError/.test(x));
+  if (crash.length) problems.push('调参页面控制台报错：' + crash[0].slice(0, 90));
+  await page.close();
+
+  bad += problems.length;
+  line(problems.length === 0, '调参面板（?tune=1）', steps.join('；')
+    + (problems.length ? '\n        ' + problems.join('\n        ') : ''));
+  return bad;
+}
+
 async function main() {
   const why = pw.whyUnavailable();
   if (why) console.log('（' + why + '）');
@@ -741,6 +916,7 @@ async function main() {
     bad += await checkRecord(browser);
     bad += await checkInteract(browser);
     bad += await checkA11y(browser);
+    bad += await checkTune(browser);
   } finally {
     if (server) { try { server.kill('SIGKILL'); } catch (e) { /* 已退出 */ } }
     if (browser) await browser.close();

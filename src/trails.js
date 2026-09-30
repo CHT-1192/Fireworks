@@ -9,7 +9,7 @@
   var core = FW.core, data = FW.data, el = FW.elements;
   var fade = core.fade, mix = core.mix, decimate = core.decimate;
   var DOT = data.DOT, geo = data.geo, pathGeo = data.pathGeo, DENSE = data.DENSE;
-  var Element = el.Element;
+  var Element = el.Element, PHYS = el.PHYS;
 
   /* ------------------------------------------ 弹体：白热的头 + 身后一点火星 */
 
@@ -42,9 +42,9 @@
     this.width = o.width;
     this.hot = o.hot;
     this.cool = o.cool;
-    this.fadeTime = o.fadeTime === undefined ? 3.4 : o.fadeTime;
-    this.minStep = o.minStep === undefined ? 9.0 : o.minStep;
-    this.maxPts = o.maxPts === undefined ? 80 : o.maxPts;
+    this.fadeTime = o.fadeTime === undefined ? PHYS.trailFade : o.fadeTime;
+    this.minStep = o.minStep === undefined ? PHYS.trailStep : o.minStep;
+    this.maxPts = o.maxPts === undefined ? PHYS.trailMaxPts : o.maxPts;
   }
   Trail.prototype = Object.create(Element.prototype);
   Trail.prototype.constructor = Trail;

@@ -70,7 +70,15 @@ const WANT = [
   'FW.app.App.prototype.startRecord', 'FW.app.App.prototype.stopRecord',
   'FW.app.App.prototype.say', 'FW.app.App.prototype.pauseAndSay',
   'FW.app.App.prototype.gesture', 'FW.app.App.prototype.bindReducedMotion',
-  'FW.app.App.prototype.setReduceMotion', 'FW.app.App.prototype.motionNote'
+  'FW.app.App.prototype.setReduceMotion', 'FW.app.App.prototype.motionNote',
+  'FW.view.Renderer.prototype.setBg', 'FW.view.BG',
+  'FW.show.ORCH', 'FW.elements.PHYS', 'FW.firework.CFG',
+  'FW.sound.BUDGET', 'FW.sound.CRISP', 'FW.sound.TONE', 'FW.sound.LEVEL',
+  'FW.sound.Engine.prototype.setLevel', 'FW.sound.Engine.prototype.setTone',
+  'FW.tune.controls', 'FW.tune.group', 'FW.tune.styleNames', 'FW.tune.wanted',
+  'FW.tune.load', 'FW.tune.save', 'FW.tune.reset', 'FW.tune.diff', 'FW.tune.diffJson',
+  'FW.tune.allJson', 'FW.tune.applyJson', 'FW.tune.applyLive',
+  'FW.tuneUi.mount'
 ];
 
 stubDom();

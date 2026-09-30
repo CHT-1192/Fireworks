@@ -18,6 +18,8 @@
     "sound.js",
     "sound_kit.js",
     "actions.js",
+    "tune.js",
+    "tune_ui.js",
     "ui.js"
   ]
 }
