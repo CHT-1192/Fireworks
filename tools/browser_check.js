@@ -631,7 +631,10 @@ async function checkA11y(browser) {
     app.show.onEvent = function (ev) { window.__ev[ev.type]++; return orig.apply(this, arguments); };
   });
   const st0 = await page.evaluate(() => FW.app.instance.sound.stats());
-  await page.waitForTimeout(6000);
+  // 等到至少 3 个事件（最多 15 秒）：硬等 6 秒会撞上"这几秒正好没发射"的空档 ——
+  // 那是测具的抖动，不是丢音（实测同一份代码 6 秒里 1~9 个事件都出现过）。
+  await page.waitForFunction(() => (window.__ev.launch + window.__ev.burst) >= 3, null,
+                             { timeout: 15000 }).catch(() => {});
   const noDrop = await page.evaluate(() => ({
     ev: window.__ev,
     stats: FW.app.instance.sound.stats()
@@ -639,11 +642,11 @@ async function checkA11y(browser) {
   // 比较**增量**：stats 是从页面加载起累计的，不能直接跟事件数比
   const played = (noDrop.stats.launches - st0.launches) + (noDrop.stats.bursts - st0.bursts);
   const got = noDrop.ev.launch + noDrop.ev.burst;
-  if (!(got >= 3)) problems.push(`6 秒里只收到 ${got} 个发声事件，测不出丢音`);
+  if (!(got >= 3)) problems.push(`15 秒里只收到 ${got} 个发声事件，测不出丢音`);
   else if (played !== got) {
     problems.push(`有事件被丢音：事件 ${got}（${JSON.stringify(noDrop.ev)}）只发了 ${played} 声`);
   }
-  steps.push(`不丢音：6 秒 ${got} 个事件 / ${played} 声（压小 ${noDrop.stats.squeezed} 次）`);
+  steps.push(`不丢音：${got} 个事件 / ${played} 声（压小 ${noDrop.stats.squeezed} 次）`);
 
   // E2) 可访问性标记：地标、label、canvas 名字、播报区
   const mk = await page.evaluate(() => ({

@@ -3200,7 +3200,9 @@ setTimeout(function () {
     'font:10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#e8f0ff;outline:none;',
     'background:rgba(255,255,255,.05);border:1px solid rgba(140,170,255,.22)}',
     '#tune details summary{cursor:pointer;font-size:11.5px;color:#ffd98a;margin-top:4px}',
-    '#tune .msg{min-height:14px;font-size:10.5px;line-height:1.5;color:#9ad7ff}',
+    '#tune .msg{margin:0;font-size:10.5px;line-height:1.5;color:#9ad7ff}',
+    // 消息行没内容时整行收掉：<p> 的 1em 上下边距 + 面板的 gap 会白占四十多像素
+    '#tune .msg:empty{display:none}',
     '@media (max-width:740px){#tune{width:calc(100vw - 24px)}}'
   ].join('');
 
